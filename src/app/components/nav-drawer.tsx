@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import svgPaths from '@/imports/svg-xfywb401kf';
-import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History } from 'lucide-react';
+import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useLanguage } from '@/app/contexts/language-context';
 
@@ -160,6 +160,30 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
                 onClick={() => {
                   handleItemClick('data-sources');
                   navigate('/admin/data-sources');
+                }}
+                isRTL={isRTL}
+              />
+
+              {/* أتمتة الأسئلة - Question Automation */}
+              <NavItem
+                icon={<Zap className="w-4 h-4" />}
+                label={isRTL ? 'أتمتة الأسئلة' : 'Question Automation'}
+                isActive={activeItem === 'questions'}
+                onClick={() => {
+                  handleItemClick('questions');
+                  navigate('/admin/questions');
+                }}
+                isRTL={isRTL}
+              />
+
+              {/* المخاطر المحددة - Defined Risks */}
+              <NavItem
+                icon={<ShieldAlert className="w-4 h-4" />}
+                label={isRTL ? 'المخاطر المحددة' : 'Defined Risks'}
+                isActive={activeItem === 'risks'}
+                onClick={() => {
+                  handleItemClick('risks');
+                  navigate('/admin/risks');
                 }}
                 isRTL={isRTL}
               />

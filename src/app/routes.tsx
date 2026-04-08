@@ -10,6 +10,10 @@ import { EditEndpointPage } from '@/app/pages/edit-endpoint-page';
 import { TestEndpointPage } from '@/app/pages/test-endpoint-page';
 import { EnrollDataSourcePage } from '@/app/pages/enroll-data-source-page';
 import { QueriesPage } from '@/app/pages/queries-page';
+import { QuestionAutomationPage } from '@/app/pages/question-automation-page';
+import { ConfigureAutomationPage } from '@/app/pages/configure-automation-page';
+import { DefinedRisksPage } from '@/app/pages/defined-risks-page';
+import { ConfigureRiskAutomationPage } from '@/app/pages/configure-risk-automation-page';
 import { CreateQueryPage } from '@/app/pages/create-query-page';
 import { QueryDetailsPage } from '@/app/pages/query-details-page';
 import { QueryPreviewPage } from '@/app/pages/query-preview-page';
@@ -65,6 +69,22 @@ export const router = createBrowserRouter([
           {
             path: 'data-sources/:id/enroll',
             element: <EnrollDataSourcePage />
+          },
+          {
+            path: 'questions',
+            element: <QuestionAutomationPage />
+          },
+          {
+            path: 'questions/:id/configure-automation',
+            element: <ConfigureAutomationPage />
+          },
+          {
+            path: 'risks',
+            element: <DefinedRisksPage />
+          },
+          {
+            path: 'risks/:id/configure-automation',
+            element: <ConfigureRiskAutomationPage />
           },
           {
             path: 'queries',
