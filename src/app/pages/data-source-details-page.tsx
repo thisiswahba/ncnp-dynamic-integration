@@ -174,8 +174,7 @@ export function DataSourceDetailsPage() {
   };
 
   const handleAddEndpoint = () => {
-    console.log('Adding new endpoint');
-    setShowSuccessBanner(true);
+    navigate(`/admin/data-sources/${id}/add-endpoint`);
   };
 
   const handleEditSecurity = () => {
