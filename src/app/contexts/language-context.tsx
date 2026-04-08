@@ -331,7 +331,7 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'pagination.next': 'Next',
       
       // Data Sources
-      'dataSources.title': 'List of Source(s) Systems',
+      'dataSources.title': 'List of Sources',
       'dataSources.subtitle': '',
       'dataSources.headerSubtitle': 'Manage and configure external data sources',
       'dataSources.search': 'Search for data source...',
