@@ -1,32 +1,54 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, ChevronDown, ChevronRight, Plus, Trash2, Play, Save, Database, Zap } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Trash2,
+  Play,
+  Save,
+  Zap,
+  FileText,
+  Sparkles,
+  Layers,
+  Lock,
+  ArrowRight,
+  Info,
+} from 'lucide-react';
 import { Badge } from '@/app/components/ui/badge';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
+import { Switch } from '@/app/components/ui/switch';
 import { useLanguage } from '@/app/contexts/language-context';
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Question {
+interface Answer {
   id: string;
-  questionId: string;
-  questionText: string;
-  answerType: string;
-  automationStatus: 'manual' | 'automated' | 'pending';
-  businessDomain: string;
-  queryId: string | null;
+  text: string;
+  weight: number;
+}
+
+interface QuestionNode {
+  id: string;
+  title: string;
+  answerType: 'Yes/No' | 'Numeric' | 'Percentage' | 'Multiple Choice';
+  automated: boolean;
+  answers: Answer[];
+  children?: QuestionNode[];
 }
 
 interface MetadataElement {
   name: string;
   type: 'String' | 'Number' | 'Date';
+  source: string;
 }
 
 interface MetadataGroup {
   source: string;
   domain: string;
-  elements: MetadataElement[];
+  elements: { name: string; type: 'String' | 'Number' | 'Date' }[];
 }
 
 interface QueryCondition {
@@ -38,49 +60,132 @@ interface QueryCondition {
   connector: 'AND' | 'OR';
 }
 
-type ValidationStatus = 'unvalidated' | 'valid' | 'saved';
+type ValidationStatus = 'unvalidated' | 'valid' | 'invalid' | 'saved';
 
-// ── Mock Data ──────────────────────────────────────────────────────────────────
+// ── Mock Data ─────────────────────────────────────────────────────────────────
 
-const mockQuestions: Question[] = [
-  { id: '1', questionId: 'Q-001', questionText: 'Does the organization have a financial audit policy?', answerType: 'Yes/No', automationStatus: 'automated', businessDomain: 'Finance', queryId: 'QRY-001' },
-  { id: '2', questionId: 'Q-002', questionText: 'Is there a documented risk management framework?', answerType: 'Yes/No', automationStatus: 'automated', businessDomain: 'Compliance', queryId: 'QRY-005' },
-  { id: '3', questionId: 'Q-003', questionText: 'What is the total number of active employees?', answerType: 'Numeric', automationStatus: 'manual', businessDomain: 'HR', queryId: null },
-  { id: '4', questionId: 'Q-004', questionText: 'Does the entity maintain a customer complaints log?', answerType: 'Yes/No', automationStatus: 'manual', businessDomain: 'CRM', queryId: null },
-  { id: '5', questionId: 'Q-005', questionText: 'What percentage of revenue is allocated to training?', answerType: 'Percentage', automationStatus: 'pending', businessDomain: 'Finance', queryId: null },
-  { id: '6', questionId: 'Q-006', questionText: 'Is the data retention policy compliant with regulations?', answerType: 'Yes/No', automationStatus: 'automated', businessDomain: 'Compliance', queryId: 'QRY-003' },
-  { id: '7', questionId: 'Q-007', questionText: 'Does the organization conduct annual security audits?', answerType: 'Yes/No', automationStatus: 'manual', businessDomain: 'Operations', queryId: null },
-  { id: '8', questionId: 'Q-008', questionText: 'What is the average response time for support tickets?', answerType: 'Numeric', automationStatus: 'manual', businessDomain: 'CRM', queryId: null },
-];
+const mockQuestionTree: Record<string, QuestionNode> = {
+  '1': {
+    id: '#1001',
+    title: 'Is there an increase in the number of services provided?',
+    answerType: 'Yes/No',
+    automated: false,
+    answers: [
+      { id: 'a1', text: 'Yes', weight: 10 },
+      { id: 'a2', text: 'No', weight: 0 },
+    ],
+    children: [
+      {
+        id: '#1001.1',
+        title: 'If yes, by how much percentage did services increase?',
+        answerType: 'Percentage',
+        automated: true,
+        answers: [
+          { id: 'a3', text: '0 – 25%', weight: 2 },
+          { id: 'a4', text: '26 – 50%', weight: 5 },
+          { id: 'a5', text: '51 – 75%', weight: 7 },
+          { id: 'a6', text: 'More than 75%', weight: 10 },
+        ],
+      },
+      {
+        id: '#1001.2',
+        title: 'In which sectors did the increase occur?',
+        answerType: 'Multiple Choice',
+        automated: false,
+        answers: [
+          { id: 'a7', text: 'Education', weight: 5 },
+          { id: 'a8', text: 'Health', weight: 8 },
+          { id: 'a9', text: 'Social Services', weight: 3 },
+        ],
+      },
+      {
+        id: '#1001.3',
+        title: 'What is the total number of additional beneficiaries?',
+        answerType: 'Numeric',
+        automated: true,
+        answers: [
+          { id: 'a10', text: 'Less than 100', weight: 1 },
+          { id: 'a11', text: '100 – 500', weight: 3 },
+          { id: 'a12', text: '501 – 1000', weight: 6 },
+          { id: 'a13', text: 'More than 1000', weight: 10 },
+        ],
+      },
+    ],
+  },
+  '2': {
+    id: '#1002',
+    title: 'Approximately how many years has the organization been operating?',
+    answerType: 'Numeric',
+    automated: true,
+    answers: [
+      { id: 'a14', text: 'Less than 2 years', weight: 1 },
+      { id: 'a15', text: '2 – 5 years', weight: 4 },
+      { id: 'a16', text: 'More than 5 years', weight: 10 },
+    ],
+  },
+  '3': {
+    id: '#1003',
+    title: 'Approximately how many years of experience does the management have?',
+    answerType: 'Numeric',
+    automated: false,
+    answers: [
+      { id: 'a17', text: 'Less than 3 years', weight: 2 },
+      { id: 'a18', text: '3 – 7 years', weight: 5 },
+      { id: 'a19', text: 'More than 7 years', weight: 10 },
+    ],
+  },
+  '4': {
+    id: '#1004',
+    title: 'Approximately how many years of compliance has been maintained?',
+    answerType: 'Numeric',
+    automated: true,
+    answers: [
+      { id: 'a20', text: 'Less than 1 year', weight: 0 },
+      { id: 'a21', text: '1 – 3 years', weight: 5 },
+      { id: 'a22', text: 'More than 3 years', weight: 10 },
+    ],
+  },
+  '5': {
+    id: '#1005',
+    title: 'Approximately how many years of reporting has been done?',
+    answerType: 'Numeric',
+    automated: false,
+    answers: [
+      { id: 'a23', text: 'Less than 1 year', weight: 0 },
+      { id: 'a24', text: '1 – 3 years', weight: 5 },
+      { id: 'a25', text: 'More than 3 years', weight: 10 },
+    ],
+  },
+};
 
 const metadataGroups: MetadataGroup[] = [
   {
-    source: 'Customer Management API',
-    domain: 'CRM',
-    elements: [
-      { name: 'customer_name', type: 'String' },
-      { name: 'account_status', type: 'String' },
-      { name: 'total_orders', type: 'Number' },
-      { name: 'registration_date', type: 'Date' },
-    ],
-  },
-  {
-    source: 'Payment Gateway',
+    source: 'Tax Agency',
     domain: 'Finance',
     elements: [
-      { name: 'transaction_count', type: 'Number' },
+      { name: 'tax_registration_year', type: 'Number' },
       { name: 'total_revenue', type: 'Number' },
-      { name: 'last_payment_date', type: 'Date' },
-      { name: 'payment_status', type: 'String' },
+      { name: 'last_filing_date', type: 'Date' },
+      { name: 'tax_status', type: 'String' },
     ],
   },
   {
-    source: 'Inventory System',
+    source: 'MFA',
+    domain: 'Compliance',
+    elements: [
+      { name: 'registration_date', type: 'Date' },
+      { name: 'compliance_score', type: 'Number' },
+      { name: 'license_status', type: 'String' },
+    ],
+  },
+  {
+    source: 'NCNP',
     domain: 'Operations',
     elements: [
-      { name: 'stock_level', type: 'Number' },
-      { name: 'warehouse_location', type: 'String' },
-      { name: 'last_audit_date', type: 'Date' },
+      { name: 'beneficiaries_count', type: 'Number' },
+      { name: 'services_count', type: 'Number' },
+      { name: 'sector', type: 'String' },
+      { name: 'last_update', type: 'Date' },
     ],
   },
 ];
@@ -88,14 +193,14 @@ const metadataGroups: MetadataGroup[] = [
 const comparisonOperators = ['=', '\u2260', '>', '<', '\u2265', '\u2264'];
 const textOperators = ['CONTAINS', 'STARTS WITH', 'ENDS WITH'];
 
-function getAllElements(): { label: string; value: string; type: string }[] {
-  const elements: { label: string; value: string; type: string }[] = [];
+function getAllElements(): MetadataElement[] {
+  const elements: MetadataElement[] = [];
   for (const group of metadataGroups) {
     for (const el of group.elements) {
       elements.push({
-        label: `${el.name} (${el.type})`,
-        value: `${group.source}.${el.name}`,
+        name: el.name,
         type: el.type,
+        source: group.source,
       });
     }
   }
@@ -106,13 +211,108 @@ function getOperatorsForType(type: string): string[] {
   if (type === 'String') {
     return [...comparisonOperators.slice(0, 2), ...textOperators];
   }
-  if (type === 'Date') {
-    return comparisonOperators;
-  }
   return comparisonOperators;
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+function elementValue(element: MetadataElement): string {
+  return `${element.source}.${element.name}`;
+}
+
+// ── Tree Node Component ───────────────────────────────────────────────────────
+
+interface TreeNodeProps {
+  node: QuestionNode;
+  depth: number;
+  selectedId: string;
+  expandedIds: Set<string>;
+  onSelect: (id: string) => void;
+  onToggleExpand: (id: string) => void;
+  isRTL: boolean;
+  t: (key: string) => string;
+  automationEnabled: Record<string, boolean>;
+}
+
+function TreeNode({
+  node,
+  depth,
+  selectedId,
+  expandedIds,
+  onSelect,
+  onToggleExpand,
+  isRTL,
+  t,
+  automationEnabled,
+}: TreeNodeProps) {
+  const hasChildren = node.children && node.children.length > 0;
+  const isExpanded = expandedIds.has(node.id);
+  const isSelected = selectedId === node.id;
+  const isAuto = automationEnabled[node.id];
+
+  return (
+    <>
+      <button
+        onClick={() => onSelect(node.id)}
+        className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
+          isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'
+        } ${isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-foreground'}`}
+        style={{
+          [isRTL ? 'paddingRight' : 'paddingLeft']: `${12 + depth * 16}px`,
+          fontSize: 'var(--text-sm)',
+        }}
+      >
+        {hasChildren ? (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand(node.id);
+            }}
+            className="flex items-center justify-center w-4 h-4 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className={`w-4 h-4 ${isRTL ? 'rotate-180' : ''}`} />
+            )}
+          </span>
+        ) : (
+          <span className="w-4 h-4 shrink-0" />
+        )}
+        <FileText
+          className={`w-4 h-4 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}
+        />
+        <span className="flex-1 truncate" style={{ fontWeight: isSelected ? 600 : 500 }}>
+          {node.id}
+        </span>
+        {isAuto && (
+          <span
+            title={t('configureAutomation.tree.auto')}
+            className="w-2 h-2 rounded-full bg-blue-500 shrink-0"
+          />
+        )}
+      </button>
+      {hasChildren && isExpanded && (
+        <>
+          {node.children!.map((child) => (
+            <TreeNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              selectedId={selectedId}
+              expandedIds={expandedIds}
+              onSelect={onSelect}
+              onToggleExpand={onToggleExpand}
+              isRTL={isRTL}
+              t={t}
+              automationEnabled={automationEnabled}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+// ── Page Component ────────────────────────────────────────────────────────────
 
 export function ConfigureAutomationPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,15 +320,51 @@ export function ConfigureAutomationPage() {
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
 
-  const question = mockQuestions.find((q) => q.id === id);
+  const rootQuestion = mockQuestionTree[id ?? '1'] ?? mockQuestionTree['1'];
   const allElements = getAllElements();
 
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [conditions, setConditions] = useState<QueryCondition[]>([]);
+  const questionMap = useMemo(() => {
+    const map = new Map<string, QuestionNode>();
+    const walk = (node: QuestionNode) => {
+      map.set(node.id, node);
+      node.children?.forEach(walk);
+    };
+    walk(rootQuestion);
+    return map;
+  }, [rootQuestion]);
+
+  const [selectedId, setSelectedId] = useState<string>(rootQuestion.id);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set([rootQuestion.id]));
+  const [automationEnabled, setAutomationEnabled] = useState<Record<string, boolean>>(() => {
+    const map: Record<string, boolean> = {};
+    questionMap.forEach((q, qid) => {
+      map[qid] = q.automated;
+    });
+    return map;
+  });
+  const [conditions, setConditions] = useState<Record<string, QueryCondition[]>>({});
+  const [answerMapping, setAnswerMapping] = useState<Record<string, string>>({});
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('unvalidated');
 
-  const toggleGroup = (source: string) => {
-    setExpandedGroups((prev) => ({ ...prev, [source]: !prev[source] }));
+  const selectedQuestion = questionMap.get(selectedId) ?? rootQuestion;
+  const selectedConditions = conditions[selectedId] ?? [];
+  const isAutomationOn = automationEnabled[selectedId] ?? false;
+  const selectedAnswerKey = answerMapping[selectedId] ?? '';
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
+  const toggleExpand = (nodeId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  const toggleAutomation = (enabled: boolean) => {
+    setAutomationEnabled((prev) => ({ ...prev, [selectedId]: enabled }));
+    setValidationStatus('unvalidated');
   };
 
   const addCondition = () => {
@@ -140,45 +376,51 @@ export function ConfigureAutomationPage() {
       value: '',
       connector: 'AND',
     };
-    setConditions((prev) => [...prev, newCondition]);
+    setConditions((prev) => ({
+      ...prev,
+      [selectedId]: [...(prev[selectedId] ?? []), newCondition],
+    }));
     setValidationStatus('unvalidated');
   };
 
   const removeCondition = (conditionId: string) => {
-    setConditions((prev) => prev.filter((c) => c.id !== conditionId));
+    setConditions((prev) => ({
+      ...prev,
+      [selectedId]: (prev[selectedId] ?? []).filter((c) => c.id !== conditionId),
+    }));
     setValidationStatus('unvalidated');
   };
 
   const updateCondition = (conditionId: string, field: keyof QueryCondition, value: string) => {
-    setConditions((prev) =>
-      prev.map((c) => {
+    setConditions((prev) => ({
+      ...prev,
+      [selectedId]: (prev[selectedId] ?? []).map((c) => {
         if (c.id !== conditionId) return c;
         const updated = { ...c, [field]: value };
-        // When element changes, update type and reset operator
         if (field === 'element') {
-          const match = allElements.find((el) => el.value === value);
+          const match = allElements.find((el) => elementValue(el) === value);
           updated.elementType = match?.type ?? '';
           updated.operator = '';
         }
         return updated;
-      })
-    );
+      }),
+    }));
     setValidationStatus('unvalidated');
   };
 
   const toggleConnector = (conditionId: string) => {
-    setConditions((prev) =>
-      prev.map((c) =>
+    setConditions((prev) => ({
+      ...prev,
+      [selectedId]: (prev[selectedId] ?? []).map((c) =>
         c.id === conditionId
           ? { ...c, connector: c.connector === 'AND' ? 'OR' : 'AND' }
           : c
-      )
-    );
+      ),
+    }));
     setValidationStatus('unvalidated');
   };
 
   const handleValidateExecute = () => {
-    // Simulate validation
     setValidationStatus('valid');
   };
 
@@ -190,40 +432,11 @@ export function ConfigureAutomationPage() {
     navigate('/admin/questions');
   };
 
-  const getValidationBadge = () => {
-    switch (validationStatus) {
-      case 'unvalidated':
-        return (
-          <Badge variant="outline" className="bg-muted text-muted-foreground" style={{ fontSize: 'var(--text-xs)' }}>
-            {t('configureAutomation.status.unvalidated')}
-          </Badge>
-        );
-      case 'valid':
-        return (
-          <Badge className="bg-success-light text-success border-success-border" style={{ fontSize: 'var(--text-xs)' }}>
-            {t('configureAutomation.status.valid')}
-          </Badge>
-        );
-      case 'saved':
-        return (
-          <Badge className="bg-blue-50 text-blue-700 border-blue-200" style={{ fontSize: 'var(--text-xs)' }}>
-            {t('configureAutomation.status.saved')}
-          </Badge>
-        );
-    }
-  };
-
-  if (!question) {
-    return (
-      <div className="px-8 py-6 max-w-7xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
-        <p className="text-muted-foreground">{t('questionAutomation.noData')}</p>
-      </div>
-    );
-  }
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="px-8 py-6 max-w-7xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
-      {/* Back Button & Header */}
+    <div className="px-8 py-6 max-w-[1400px] mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
+      {/* Header */}
       <div className="mb-6">
         <button
           onClick={() => navigate('/admin/questions')}
@@ -233,272 +446,461 @@ export function ConfigureAutomationPage() {
           <ArrowLeft className={`w-4 h-4 ${isRTL ? 'rotate-180' : ''}`} />
           {t('configureAutomation.back')}
         </button>
-        <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-          <Zap className="w-6 h-6 text-primary" />
-          <h1 className="text-foreground" style={{ fontSize: 'var(--text-3xl)', fontWeight: 700 }}>
-            {t('configureAutomation.title')}
-          </h1>
-          {getValidationBadge()}
-        </div>
-      </div>
-
-      {/* Question Details Card */}
-      <div className="bg-white rounded-xl border border-border p-6 shadow-sm mb-6">
-        <h2 className="text-foreground mb-4" style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-          {t('configureAutomation.questionDetails')}
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <p className="text-muted-foreground mb-1" style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}>
-              {t('questionAutomation.questionId')}
-            </p>
-            <p className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-              {question.questionId}
-            </p>
-          </div>
-          <div className="lg:col-span-2">
-            <p className="text-muted-foreground mb-1" style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}>
-              {t('questionAutomation.questionText')}
-            </p>
-            <p className="text-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-              {question.questionText}
-            </p>
-          </div>
-          <div className="flex gap-6">
-            <div>
-              <p className="text-muted-foreground mb-1" style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}>
-                {t('questionAutomation.answerType')}
-              </p>
-              <p className="text-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-                {question.answerType}
-              </p>
+        <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+          <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Zap className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <p className="text-muted-foreground mb-1" style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}>
-                {t('questionAutomation.businessDomain')}
-              </p>
-              <p className="text-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-                {question.businessDomain}
+              <h1 className="text-foreground" style={{ fontSize: 'var(--text-2xl)', fontWeight: 700 }}>
+                {t('configureAutomation.title')}
+              </h1>
+              <p className="text-muted-foreground" style={{ fontSize: 'var(--text-sm)' }}>
+                {rootQuestion.id} · {rootQuestion.title}
               </p>
             </div>
+          </div>
+          <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+            <Button variant="outline" onClick={handleCancel} style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+              {t('configureAutomation.cancel')}
+            </Button>
+            <Button
+              onClick={handleSave}
+              className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+              style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+            >
+              <Save className="w-4 h-4" />
+              {t('configureAutomation.saveAll')}
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Query Builder Section */}
-      <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-foreground" style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-            {t('configureAutomation.queryBuilder')}
-          </h2>
+      {/* Main Layout: Tree + Details */}
+      <div className="grid grid-cols-[280px_1fr] gap-6">
+        {/* Tree Panel */}
+        <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden h-fit sticky top-6">
+          <div className={`flex items-center gap-2 px-4 py-3 border-b border-border ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            <h2 className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+              {t('configureAutomation.tree.title')}
+            </h2>
+          </div>
+          <div className="p-2 max-h-[700px] overflow-y-auto">
+            <TreeNode
+              node={rootQuestion}
+              depth={0}
+              selectedId={selectedId}
+              expandedIds={expandedIds}
+              onSelect={setSelectedId}
+              onToggleExpand={toggleExpand}
+              isRTL={isRTL}
+              t={t}
+              automationEnabled={automationEnabled}
+            />
+          </div>
+          {/* Legend */}
+          <div className={`px-4 py-3 border-t border-border flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span className="text-muted-foreground" style={{ fontSize: 'var(--text-xs)' }}>
+              {t('configureAutomation.tree.autoLegend')}
+            </span>
+          </div>
         </div>
 
-        <div className={`flex ${isRTL ? 'flex-row-reverse' : 'flex-row'} min-h-[500px]`}>
-          {/* Left Panel — Metadata Elements */}
-          <div className={`w-72 shrink-0 bg-muted/50 border-border ${isRTL ? 'border-l' : 'border-r'}`}>
-            <div className="p-4 border-b border-border">
+        {/* Detail Panel */}
+        <div className="space-y-6">
+          {/* Section 1: Question Summary */}
+          <section className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-border bg-muted/20">
               <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-                <Database className="w-4 h-4 text-muted-foreground" />
-                <h3 className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-                  {t('configureAutomation.metadataElements')}
+                <span
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white"
+                  style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                >
+                  1
+                </span>
+                <h3 className="text-foreground" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>
+                  {t('configureAutomation.sections.question')}
                 </h3>
               </div>
             </div>
-            <div className="overflow-y-auto max-h-[450px]">
-              {metadataGroups.map((group) => (
-                <div key={group.source} className="border-b border-border last:border-b-0">
-                  <button
-                    onClick={() => toggleGroup(group.source)}
-                    className={`w-full px-4 py-3 flex items-center justify-between hover:bg-muted/80 transition-colors ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+            <div className="p-6">
+              <div className={`flex items-center gap-2 mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                <span className="text-primary" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+                  {selectedQuestion.id}
+                </span>
+                <Badge
+                  variant="outline"
+                  className="bg-muted text-muted-foreground"
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  {selectedQuestion.answerType}
+                </Badge>
+                {isAutomationOn && (
+                  <Badge
+                    variant="outline"
+                    className="bg-blue-50 text-blue-700 border-blue-200"
+                    style={{ fontSize: 'var(--text-xs)' }}
                   >
-                    <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-                      {expandedGroups[group.source] ? (
-                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className={`w-4 h-4 text-muted-foreground ${isRTL ? 'rotate-180' : ''}`} />
-                      )}
-                      <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
-                        {group.source}
+                    <Sparkles className="w-3 h-3" />
+                    {t('configureAutomation.status.automated')}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-foreground" style={{ fontSize: 'var(--text-lg)', fontWeight: 600, lineHeight: 1.4 }}>
+                {selectedQuestion.title}
+              </p>
+            </div>
+          </section>
+
+          {/* Section 2: Predefined Answers (READ ONLY) */}
+          <section className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-border bg-muted/20">
+              <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <span
+                    className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white"
+                    style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                  >
+                    2
+                  </span>
+                  <h3 className="text-foreground" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>
+                    {t('configureAutomation.sections.answers')}
+                  </h3>
+                </div>
+                <div
+                  className={`flex items-center gap-1.5 text-muted-foreground ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{t('configureAutomation.answers.readOnly')}</span>
+                </div>
+              </div>
+            </div>
+            <div className="p-6">
+              <div
+                className={`flex items-start gap-2 p-3 mb-4 rounded-lg bg-blue-50 border border-blue-100 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+              >
+                <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <p className="text-blue-900" style={{ fontSize: 'var(--text-xs)', lineHeight: 1.5 }}>
+                  {t('configureAutomation.answers.helper')}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {selectedQuestion.answers.map((answer) => (
+                  <div
+                    key={answer.id}
+                    className="bg-muted/30 border border-border rounded-lg p-3"
+                  >
+                    <p
+                      className="text-foreground mb-2 truncate"
+                      style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                      title={answer.text}
+                    >
+                      {answer.text}
+                    </p>
+                    <div className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <span
+                        className="text-muted-foreground"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.weight')}:
+                      </span>
+                      <span
+                        className="inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded bg-primary/10 text-primary"
+                        style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                      >
+                        {answer.weight}
                       </span>
                     </div>
-                    <Badge variant="outline" className="text-muted-foreground" style={{ fontSize: '10px' }}>
-                      {group.domain}
-                    </Badge>
-                  </button>
-                  {expandedGroups[group.source] && (
-                    <div className={`pb-2 ${isRTL ? 'pr-8 pl-4' : 'pl-8 pr-4'}`}>
-                      {group.elements.map((element) => (
-                        <div
-                          key={element.name}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-md hover:bg-muted cursor-pointer text-foreground ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                          style={{ fontSize: 'var(--text-xs)' }}
-                          onClick={() => {
-                            // Add a new condition pre-filled with this element
-                            const newCondition: QueryCondition = {
-                              id: crypto.randomUUID(),
-                              element: `${group.source}.${element.name}`,
-                              elementType: element.type,
-                              operator: '',
-                              value: '',
-                              connector: 'AND',
-                            };
-                            setConditions((prev) => [...prev, newCondition]);
-                            setValidationStatus('unvalidated');
-                          }}
-                        >
-                          <span className="font-mono text-foreground">{element.name}</span>
-                          <span className="text-muted-foreground">({element.type})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Section 3: Auto Query Settings */}
+          <section className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-border bg-muted/20">
+              <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <span
+                    className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white"
+                    style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                  >
+                    3
+                  </span>
+                  <h3 className="text-foreground" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>
+                    {t('configureAutomation.sections.autoQuery')}
+                  </h3>
+                </div>
+                <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <span
+                    className={isAutomationOn ? 'text-primary' : 'text-muted-foreground'}
+                    style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                  >
+                    {isAutomationOn
+                      ? t('configureAutomation.enabled')
+                      : t('configureAutomation.disabled')}
+                  </span>
+                  <Switch checked={isAutomationOn} onCheckedChange={toggleAutomation} />
+                </div>
+              </div>
+            </div>
+
+            {!isAutomationOn ? (
+              <div className="px-6 py-12 text-center">
+                <div className="w-12 h-12 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
+                  <Sparkles className="w-6 h-6 text-muted-foreground" />
+                </div>
+                <p className="text-foreground mb-1" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+                  {t('configureAutomation.automationOff')}
+                </p>
+                <p
+                  className="text-muted-foreground max-w-md mx-auto"
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  {t('configureAutomation.automationOffHint')}
+                </p>
+              </div>
+            ) : (
+              <div className="p-6 space-y-5">
+                {/* Helper: explain what we are building */}
+                <div
+                  className={`flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                >
+                  <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <p className="text-blue-900" style={{ fontSize: 'var(--text-xs)', lineHeight: 1.5 }}>
+                    {t('configureAutomation.autoQuery.helper')}
+                  </p>
+                </div>
+
+                {/* Query conditions */}
+                <div>
+                  <div className={`flex items-center justify-between mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <label className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+                      {t('configureAutomation.autoQuery.whenLabel')}
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={addCondition}
+                      className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                      style={{ fontSize: 'var(--text-sm)' }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      {t('configureAutomation.addCondition')}
+                    </Button>
+                  </div>
+
+                  {selectedConditions.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-center border-2 border-dashed border-border rounded-lg">
+                      <p className="text-foreground mb-1" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+                        {t('configureAutomation.noConditions')}
+                      </p>
+                      <p
+                        className="text-muted-foreground max-w-sm"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.noConditionsHint')}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedConditions.map((condition, index) => (
+                        <div key={condition.id}>
+                          {index > 0 && (
+                            <div className="flex justify-center my-1.5">
+                              <button
+                                onClick={() => toggleConnector(condition.id)}
+                                className="px-3 py-1 rounded-full border border-border bg-white hover:bg-muted text-foreground transition-colors"
+                                style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                              >
+                                {condition.connector}
+                              </button>
+                            </div>
+                          )}
+                          <div className="bg-muted/30 rounded-lg border border-border p-3">
+                            <div
+                              className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                            >
+                              <div className="flex-1">
+                                <select
+                                  value={condition.element}
+                                  onChange={(e) =>
+                                    updateCondition(condition.id, 'element', e.target.value)
+                                  }
+                                  className={`w-full h-10 rounded-md border border-border bg-white px-3 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
+                                  style={{ fontSize: 'var(--text-sm)' }}
+                                >
+                                  <option value="">
+                                    {t('configureAutomation.selectElement')}
+                                  </option>
+                                  {metadataGroups.map((group) => (
+                                    <optgroup key={group.source} label={group.source}>
+                                      {group.elements.map((el) => (
+                                        <option
+                                          key={`${group.source}.${el.name}`}
+                                          value={`${group.source}.${el.name}`}
+                                        >
+                                          {el.name} ({el.type})
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="w-32">
+                                <select
+                                  value={condition.operator}
+                                  onChange={(e) =>
+                                    updateCondition(condition.id, 'operator', e.target.value)
+                                  }
+                                  className={`w-full h-10 rounded-md border border-border bg-white px-3 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
+                                  style={{ fontSize: 'var(--text-sm)' }}
+                                  disabled={!condition.element}
+                                >
+                                  <option value="">{t('configureAutomation.operator')}</option>
+                                  {condition.elementType &&
+                                    getOperatorsForType(condition.elementType).map((op) => (
+                                      <option key={op} value={op}>
+                                        {op}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                              <div className="flex-1">
+                                <Input
+                                  type="text"
+                                  placeholder={t('configureAutomation.enterValue')}
+                                  value={condition.value}
+                                  onChange={(e) =>
+                                    updateCondition(condition.id, 'value', e.target.value)
+                                  }
+                                  className={`h-10 bg-white ${isRTL ? 'text-right' : 'text-left'}`}
+                                  style={{ fontSize: 'var(--text-sm)' }}
+                                />
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-10 w-10 text-muted-foreground hover:text-destructive shrink-0"
+                                onClick={() => removeCondition(condition.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Right Panel — Query Workspace */}
-          <div className="flex-1 p-6">
-            <div className={`flex items-center justify-between mb-6 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-              <h3 className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-                {t('configureAutomation.queryWorkspace')}
-              </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={addCondition}
-                className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                style={{ fontSize: 'var(--text-sm)' }}
-              >
-                <Plus className="w-4 h-4" />
-                {t('configureAutomation.addCondition')}
-              </Button>
-            </div>
-
-            {/* Conditions */}
-            {conditions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                  <Zap className="w-6 h-6 text-muted-foreground" />
+                {/* Answer mapping */}
+                <div className={`flex items-center gap-2 py-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <ArrowRight
+                    className={`w-4 h-4 text-muted-foreground ${isRTL ? 'rotate-180' : ''}`}
+                  />
+                  <label className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+                    {t('configureAutomation.autoQuery.thenLabel')}
+                  </label>
                 </div>
-                <p className="text-muted-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-                  {t('configureAutomation.noConditions')}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {conditions.map((condition, index) => (
-                  <div key={condition.id}>
-                    {/* Connector toggle between conditions */}
-                    {index > 0 && (
-                      <div className="flex justify-center my-2">
-                        <button
-                          onClick={() => toggleConnector(condition.id)}
-                          className="px-3 py-1 rounded-full text-xs font-semibold border border-border bg-muted hover:bg-muted/80 text-foreground transition-colors"
-                        >
-                          {condition.connector}
-                        </button>
-                      </div>
-                    )}
 
-                    {/* Condition Card */}
-                    <div className="bg-muted/30 rounded-lg border border-border p-4">
-                      <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-                        {/* Element Select */}
-                        <div className="flex-1">
-                          <select
-                            value={condition.element}
-                            onChange={(e) => updateCondition(condition.id, 'element', e.target.value)}
-                            className={`w-full h-9 rounded-md border border-border bg-white px-3 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
-                            style={{ fontSize: 'var(--text-sm)' }}
-                          >
-                            <option value="">{t('configureAutomation.selectElement')}</option>
-                            {allElements.map((el) => (
-                              <option key={el.value} value={el.value}>
-                                {el.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Operator Select */}
-                        <div className="w-40">
-                          <select
-                            value={condition.operator}
-                            onChange={(e) => updateCondition(condition.id, 'operator', e.target.value)}
-                            className={`w-full h-9 rounded-md border border-border bg-white px-3 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
-                            style={{ fontSize: 'var(--text-sm)' }}
-                            disabled={!condition.element}
-                          >
-                            <option value="">{t('configureAutomation.selectOperator')}</option>
-                            {condition.elementType &&
-                              getOperatorsForType(condition.elementType).map((op) => (
-                                <option key={op} value={op}>
-                                  {op}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-
-                        {/* Value Input */}
-                        <div className="flex-1">
-                          <Input
-                            type="text"
-                            placeholder={t('configureAutomation.enterValue')}
-                            value={condition.value}
-                            onChange={(e) => updateCondition(condition.id, 'value', e.target.value)}
-                            className={`h-9 ${isRTL ? 'text-right' : 'text-left'}`}
-                            style={{ fontSize: 'var(--text-sm)' }}
-                          />
-                        </div>
-
-                        {/* Delete Button */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-muted-foreground hover:text-destructive shrink-0"
-                          onClick={() => removeCondition(condition.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
+                <div className="bg-muted/30 rounded-lg border border-border p-3">
+                  <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <span
+                      className="text-muted-foreground shrink-0"
+                      style={{ fontSize: 'var(--text-sm)' }}
+                    >
+                      {t('configureAutomation.autoQuery.answerWith')}:
+                    </span>
+                    <select
+                      value={selectedAnswerKey}
+                      onChange={(e) =>
+                        setAnswerMapping((prev) => ({
+                          ...prev,
+                          [selectedId]: e.target.value,
+                        }))
+                      }
+                      className={`flex-1 h-10 rounded-md border border-border bg-white px-3 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
+                      style={{ fontSize: 'var(--text-sm)' }}
+                    >
+                      <option value="">
+                        {t('configureAutomation.autoQuery.selectAnswer')}
+                      </option>
+                      {selectedQuestion.answers.map((answer) => (
+                        <option key={answer.id} value={answer.id}>
+                          {answer.text} · {t('configureAutomation.weight')} {answer.weight}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                ))}
+                </div>
+
+                {/* Footer: validate */}
+                <div
+                  className={`flex items-center justify-between pt-3 border-t border-border ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                >
+                  <div
+                    className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                  >
+                    <span
+                      className="text-muted-foreground"
+                      style={{ fontSize: 'var(--text-sm)' }}
+                    >
+                      {t('configureAutomation.queryStatus')}:
+                    </span>
+                    {validationStatus === 'unvalidated' && (
+                      <Badge
+                        variant="outline"
+                        className="bg-muted text-muted-foreground"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.status.unvalidated')}
+                      </Badge>
+                    )}
+                    {validationStatus === 'valid' && (
+                      <Badge
+                        className="bg-green-50 text-green-700 border-green-200"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.status.valid')}
+                      </Badge>
+                    )}
+                    {validationStatus === 'invalid' && (
+                      <Badge
+                        className="bg-red-50 text-red-700 border-red-200"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.status.invalid')}
+                      </Badge>
+                    )}
+                    {validationStatus === 'saved' && (
+                      <Badge
+                        className="bg-blue-50 text-blue-700 border-blue-200"
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        {t('configureAutomation.status.saved')}
+                      </Badge>
+                    )}
+                  </div>
+                  <Button
+                    onClick={handleValidateExecute}
+                    disabled={selectedConditions.length === 0 || !selectedAnswerKey}
+                    className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                    style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                  >
+                    <Play className="w-4 h-4" />
+                    {t('configureAutomation.validateExecute')}
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
+          </section>
         </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div className={`flex items-center gap-3 mt-6 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-        <Button
-          onClick={handleValidateExecute}
-          disabled={conditions.length === 0}
-          className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-        >
-          <Play className="w-4 h-4" />
-          {t('configureAutomation.validateExecute')}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={handleSave}
-          disabled={validationStatus !== 'valid'}
-          className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-        >
-          <Save className="w-4 h-4" />
-          {t('configureAutomation.save')}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={handleCancel}
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-        >
-          {t('configureAutomation.cancel')}
-        </Button>
       </div>
     </div>
   );

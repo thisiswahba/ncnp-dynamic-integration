@@ -1,411 +1,517 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, MoreVertical, ShieldAlert } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useState } from 'react';
+import { Search, Filter, ChevronDown, ShieldAlert } from 'lucide-react';
 import { Badge } from '@/app/components/ui/badge';
+import { Button } from '@/app/components/ui/button';
+import { Checkbox } from '@/app/components/ui/checkbox';
 import { useLanguage } from '@/app/contexts/language-context';
+import {
+  AutoReplySettingsDialog,
+  type AutoReplyQuestion,
+} from '@/app/components/auto-reply-settings-dialog';
+
+type RiskLevel = 'Critical' | 'High' | 'Medium' | 'Low';
+type Determination = 'manual' | 'automated';
+type AutomationStatus = 'active' | 'inactive' | 'unconfigured';
 
 interface DefinedRisk {
   id: string;
   riskId: string;
   riskName: string;
-  riskLevel: 'Critical' | 'High' | 'Medium' | 'Low';
-  determination: 'manual' | 'automated';
-  automationStatus: 'active' | 'inactive' | null;
+  fullTitle: string;
+  riskLevel: RiskLevel;
+  determination: Determination;
+  automationStatus: AutomationStatus;
   businessDomain: string;
   queryId: string | null;
+  dateAdded: string;
+  createdBy: string;
+  criteria: { id: string; text: string; weight: number }[];
 }
 
 const mockRisks: DefinedRisk[] = [
-  { id: '1', riskId: 'RSK-001', riskName: 'Financial Non-Compliance', riskLevel: 'High', determination: 'automated', automationStatus: 'active', businessDomain: 'Finance', queryId: 'QRY-001' },
-  { id: '2', riskId: 'RSK-002', riskName: 'Data Privacy Breach', riskLevel: 'Critical', determination: 'automated', automationStatus: 'active', businessDomain: 'Compliance', queryId: 'QRY-002' },
-  { id: '3', riskId: 'RSK-003', riskName: 'Operational Downtime', riskLevel: 'Medium', determination: 'manual', automationStatus: null, businessDomain: 'Operations', queryId: null },
-  { id: '4', riskId: 'RSK-004', riskName: 'Employee Turnover Risk', riskLevel: 'Low', determination: 'manual', automationStatus: null, businessDomain: 'HR', queryId: null },
-  { id: '5', riskId: 'RSK-005', riskName: 'Regulatory Penalty Risk', riskLevel: 'High', determination: 'automated', automationStatus: 'inactive', businessDomain: 'Compliance', queryId: 'QRY-005' },
-  { id: '6', riskId: 'RSK-006', riskName: 'Customer Churn Risk', riskLevel: 'Medium', determination: 'automated', automationStatus: 'active', businessDomain: 'CRM', queryId: 'QRY-006' },
-  { id: '7', riskId: 'RSK-007', riskName: 'Supply Chain Disruption', riskLevel: 'High', determination: 'manual', automationStatus: null, businessDomain: 'Operations', queryId: null },
+  {
+    id: '1',
+    riskId: '#RSK-201',
+    riskName: 'Financial Fraud',
+    fullTitle: 'Financial Fraud Risk — High Severity',
+    riskLevel: 'High',
+    determination: 'automated',
+    automationStatus: 'active',
+    businessDomain: 'Financial',
+    queryId: '#QRY-1003',
+    dateAdded: '20/11/2024',
+    createdBy: 'Sarah A.',
+    criteria: [
+      { id: 'c1', text: 'High — entity has multiple violations', weight: 100 },
+      { id: 'c2', text: 'Medium — entity has 1-2 violations', weight: 50 },
+      { id: 'c3', text: 'Low — entity has no violations', weight: 0 },
+    ],
+  },
+  {
+    id: '2',
+    riskId: '#RSK-202',
+    riskName: 'Regulatory Violation',
+    fullTitle: 'Regulatory Violation Risk',
+    riskLevel: 'Critical',
+    determination: 'automated',
+    automationStatus: 'active',
+    businessDomain: 'Compliance',
+    queryId: '#QRY-1005',
+    dateAdded: '15/11/2024',
+    createdBy: 'Sarah A.',
+    criteria: [
+      { id: 'c4', text: 'Critical — compliance score below 40', weight: 100 },
+      { id: 'c5', text: 'Warning — compliance score 40-70', weight: 60 },
+      { id: 'c6', text: 'Safe — compliance score above 70', weight: 0 },
+    ],
+  },
+  {
+    id: '3',
+    riskId: '#RSK-203',
+    riskName: 'Service Coverage',
+    fullTitle: 'Service Coverage Risk',
+    riskLevel: 'Medium',
+    determination: 'automated',
+    automationStatus: 'inactive',
+    businessDomain: 'Operations',
+    queryId: '#QRY-1007',
+    dateAdded: '10/11/2024',
+    createdBy: 'Ahmed K.',
+    criteria: [
+      { id: 'c7', text: 'High — under 100 beneficiaries', weight: 100 },
+      { id: 'c8', text: 'Low — above 1000 beneficiaries', weight: 0 },
+    ],
+  },
+  {
+    id: '4',
+    riskId: '#RSK-204',
+    riskName: 'Operational Downtime',
+    fullTitle: 'Operational Downtime Risk',
+    riskLevel: 'Medium',
+    determination: 'manual',
+    automationStatus: 'unconfigured',
+    businessDomain: 'Operations',
+    queryId: null,
+    dateAdded: '08/11/2024',
+    createdBy: 'Ahmed K.',
+    criteria: [
+      { id: 'c9', text: 'High — downtime > 8 hours', weight: 100 },
+      { id: 'c10', text: 'Medium — 2–8 hours', weight: 50 },
+      { id: 'c11', text: 'Low — under 2 hours', weight: 10 },
+    ],
+  },
+  {
+    id: '5',
+    riskId: '#RSK-205',
+    riskName: 'Employee Turnover',
+    fullTitle: 'Employee Turnover Risk',
+    riskLevel: 'Low',
+    determination: 'manual',
+    automationStatus: 'unconfigured',
+    businessDomain: 'HR',
+    queryId: null,
+    dateAdded: '05/11/2024',
+    createdBy: 'Mohamed S.',
+    criteria: [
+      { id: 'c12', text: 'High — turnover > 25% annually', weight: 100 },
+      { id: 'c13', text: 'Low — turnover < 5%', weight: 10 },
+    ],
+  },
 ];
 
-const translations = {
-  en: {
-    title: 'Defined Risks',
-    searchPlaceholder: 'Search by Risk ID or name...',
-    colRiskId: 'Risk ID',
-    colRiskName: 'Risk Name',
-    colRiskLevel: 'Risk Level',
-    colDetermination: 'Determination Method',
-    colAutomationStatus: 'Automation Status',
-    colActions: 'Actions',
-    manual: 'Manual',
-    automated: 'Automated',
-    active: 'Active',
-    inactive: 'Inactive',
-    viewDetails: 'View Details',
-    configureAutomation: 'Configure Automation',
-    editQuery: 'Edit Query',
-    activateQuery: 'Activate Query',
-    deactivateQuery: 'Deactivate Query',
-    viewEntities: 'View Entities',
-    noData: 'No Data',
-    showing: 'Showing',
-    to: 'to',
-    of: 'of',
-    results: 'results',
-    previous: 'Previous',
-    next: 'Next',
-  },
-  ar: {
-    title: 'المخاطر المحددة',
-    searchPlaceholder: 'البحث بمعرف الخطر أو الاسم...',
-    colRiskId: 'معرف الخطر',
-    colRiskName: 'اسم الخطر',
-    colRiskLevel: 'مستوى الخطر',
-    colDetermination: 'طريقة التحديد',
-    colAutomationStatus: 'حالة الأتمتة',
-    colActions: 'الإجراءات',
-    manual: 'يدوي',
-    automated: 'مؤتمت',
-    active: 'نشط',
-    inactive: 'غير نشط',
-    viewDetails: 'عرض التفاصيل',
-    configureAutomation: 'تكوين الأتمتة',
-    editQuery: 'تعديل الاستعلام',
-    activateQuery: 'تفعيل الاستعلام',
-    deactivateQuery: 'تعطيل الاستعلام',
-    viewEntities: 'عرض الكيانات',
-    noData: 'لا توجد بيانات',
-    showing: 'عرض',
-    to: 'إلى',
-    of: 'من',
-    results: 'نتائج',
-    previous: 'السابق',
-    next: 'التالي',
-  },
-};
+const TOTAL_ENTRIES = 42;
+
+type TabKey = 'all' | 'automated' | 'manual';
 
 export function DefinedRisksPage() {
-  const navigate = useNavigate();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const isRTL = language === 'ar';
-  const tt = translations[language] || translations.en;
-
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const itemsPerPage = 10;
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [activeQuestion, setActiveQuestion] = useState<AutoReplyQuestion | null>(null);
 
-  // Click-outside handler for dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpenMenuId(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const totalPages = 5;
 
-  // Filter risks by riskId and riskName
-  const filteredRisks = mockRisks.filter(
-    (risk) =>
+  const filteredRisks = mockRisks.filter((risk) => {
+    const matchesTab = activeTab === 'all' || risk.determination === activeTab;
+    const matchesSearch =
       risk.riskId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      risk.riskName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      risk.riskName.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesTab && matchesSearch;
+  });
 
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredRisks.length / itemsPerPage));
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedRisks = filteredRisks.slice(startIndex, endIndex);
-
-  const handleToggleStatus = (id: string) => {
-    console.log('Toggle automation status for:', id);
+  const statusCount = {
+    all: mockRisks.length,
+    automated: mockRisks.filter((r) => r.determination === 'automated').length,
+    manual: mockRisks.filter((r) => r.determination === 'manual').length,
   };
 
-  const getRiskLevelBadge = (level: DefinedRisk['riskLevel']) => {
-    const styles: Record<DefinedRisk['riskLevel'], string> = {
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) setSelectedIds(new Set(filteredRisks.map((r) => r.id)));
+    else setSelectedIds(new Set());
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = filteredRisks.length > 0 && selectedIds.size === filteredRisks.length;
+
+  const handleActivateAutomation = (risk: DefinedRisk) => {
+    setActiveQuestion({
+      id: risk.riskId,
+      title: risk.fullTitle,
+      automated: risk.automationStatus === 'active',
+      answers: risk.criteria,
+    });
+    setDialogOpen(true);
+  };
+
+  const getRiskLevelBadge = (level: RiskLevel) => {
+    const styles: Record<RiskLevel, string> = {
       Critical: 'bg-red-50 text-red-700 border-red-200',
       High: 'bg-orange-50 text-orange-700 border-orange-200',
-      Medium: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-      Low: 'bg-green-50 text-green-700 border-green-200',
+      Medium: 'bg-amber-50 text-amber-700 border-amber-200',
+      Low: 'bg-blue-50 text-blue-700 border-blue-200',
     };
     return (
-      <Badge className={styles[level]} style={{ fontSize: 'var(--text-xs)' }}>
-        {level}
+      <Badge
+        variant="outline"
+        className={styles[level]}
+        style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+      >
+        {t(`definedRisks.level.${level.toLowerCase()}`)}
       </Badge>
     );
   };
 
-  const getDeterminationLabel = (determination: DefinedRisk['determination']) => {
-    return determination === 'automated' ? tt.automated : tt.manual;
-  };
-
-  const getAutomationStatusBadge = (risk: DefinedRisk) => {
+  const getStatusPill = (risk: DefinedRisk) => {
     if (risk.determination === 'manual') {
       return (
-        <span className="text-muted-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-          -
+        <span
+          className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-gray-100 text-gray-700 border border-gray-200"
+          style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+          {t('definedRisks.manual')}
         </span>
       );
     }
     if (risk.automationStatus === 'active') {
       return (
-        <Badge className="bg-success-light text-success border-success-border" style={{ fontSize: 'var(--text-xs)' }}>
-          {tt.active}
-        </Badge>
+        <span
+          className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100"
+          style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+        >
+          <span className="relative flex w-1.5 h-1.5">
+            <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+            <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          </span>
+          {t('definedRisks.autoActive')}
+        </span>
       );
     }
     return (
-      <Badge variant="outline" className="bg-muted text-muted-foreground" style={{ fontSize: 'var(--text-xs)' }}>
-        {tt.inactive}
-      </Badge>
+      <span
+        className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-amber-50 text-amber-700 border border-amber-100"
+        style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+        {t('definedRisks.autoInactive')}
+      </span>
     );
   };
 
+  const pageNumbers = () => [totalPages, '...', 3, 2, 1] as (number | string)[];
+
   return (
     <div className="px-8 py-6 max-w-7xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
-      {/* Header Section */}
-      <div className="mb-8">
-        <div className={`flex items-center gap-3 mb-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-          <ShieldAlert className="w-8 h-8 text-primary" />
+      {/* Header */}
+      <div className="mb-6">
+        <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+          <ShieldAlert className="w-6 h-6 text-primary" />
           <h1 className="text-foreground" style={{ fontSize: 'var(--text-3xl)', fontWeight: 700 }}>
-            {tt.title}
+            {t('definedRisks.title')}
           </h1>
+        </div>
+        <p className="text-muted-foreground mt-1" style={{ fontSize: 'var(--text-sm)' }}>
+          {t('definedRisks.subtitle')}
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-border mb-6">
+        <div className={`flex gap-6 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+          <TabButton
+            active={activeTab === 'all'}
+            onClick={() => {
+              setActiveTab('all');
+              setCurrentPage(1);
+            }}
+            label={t('definedRisks.tabs.all')}
+            count={statusCount.all}
+          />
+          <TabButton
+            active={activeTab === 'automated'}
+            onClick={() => {
+              setActiveTab('automated');
+              setCurrentPage(1);
+            }}
+            label={t('definedRisks.tabs.automated')}
+            count={statusCount.automated}
+          />
+          <TabButton
+            active={activeTab === 'manual'}
+            onClick={() => {
+              setActiveTab('manual');
+              setCurrentPage(1);
+            }}
+            label={t('definedRisks.tabs.manual')}
+            count={statusCount.manual}
+          />
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className={`flex items-center gap-4 mb-6 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+      {/* Search + Filter */}
+      <div className={`flex items-center gap-3 mb-4 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className="relative flex-1">
-          <Search className={`absolute top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground ${isRTL ? 'right-4' : 'left-4'}`} />
+          <Search className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'right-4' : 'left-4'}`} />
           <input
             type="text"
-            placeholder={tt.searchPlaceholder}
+            placeholder={t('definedRisks.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
               setCurrentPage(1);
             }}
-            className={`w-full py-3 bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${
-              isRTL ? 'pr-12 pl-4 text-right' : 'pl-12 pr-4 text-left'
-            }`}
+            className={`w-full h-12 bg-white border border-border rounded-lg outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-foreground placeholder:text-muted-foreground transition-colors ${isRTL ? 'pr-11 pl-4 text-right' : 'pl-11 pr-4 text-left'}`}
             style={{ fontSize: 'var(--text-sm)' }}
           />
         </div>
+        <button
+          type="button"
+          className="h-12 px-6 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors text-foreground"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+        >
+          {t('definedRisks.searchButton')}
+        </button>
+        <button
+          type="button"
+          className={`h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center gap-2 text-foreground ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+        >
+          <Filter className="w-4 h-4" />
+          <span>{t('definedRisks.filter')}</span>
+          <ChevronDown className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Entries count */}
+      <div className={`mb-3 ${isRTL ? 'text-right' : 'text-left'}`}>
+        <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+          {t('definedRisks.entriesInTable')}:{' '}
+        </span>
+        <span className="text-primary" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+          {TOTAL_ENTRIES}
+        </span>
       </div>
 
       {/* Data Table */}
-      {paginatedRisks.length > 0 ? (
-        <div className="bg-white rounded-xl border border-border overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
-              <thead className="bg-muted border-b border-border">
-                <tr>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colRiskId}
-                    </span>
-                  </th>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colRiskName}
-                    </span>
-                  </th>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colRiskLevel}
-                    </span>
-                  </th>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colDetermination}
-                    </span>
-                  </th>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colAutomationStatus}
-                    </span>
-                  </th>
-                  <th className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}>
-                    <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 700 }}>
-                      {tt.colActions}
-                    </span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {paginatedRisks.map((risk) => (
-                  <tr key={risk.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-6 py-4">
-                      <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-                        {risk.riskId}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-                        {risk.riskName}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {getRiskLevelBadge(risk.riskLevel)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-                        {getDeterminationLabel(risk.determination)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {getAutomationStatusBadge(risk)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="relative" ref={openMenuId === risk.id ? menuRef : undefined}>
-                        <button
-                          className="p-2 hover:bg-muted rounded-lg transition-colors"
-                          onClick={() => setOpenMenuId(openMenuId === risk.id ? null : risk.id)}
-                        >
-                          <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                        {openMenuId === risk.id && (
-                          <div className={`absolute z-50 mt-1 w-56 rounded-md border border-border bg-white shadow-lg ${isRTL ? 'left-0' : 'right-0'}`}>
-                            <div className="py-1">
-                              {/* View Details */}
-                              <button
-                                className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  console.log('View details:', risk.id);
-                                }}
-                              >
-                                {tt.viewDetails}
-                              </button>
-
-                              {/* Configure Automation (manual risks) */}
-                              {risk.determination === 'manual' && (
-                                <button
-                                  className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    navigate(`/admin/risks/${risk.id}/configure-automation`);
-                                  }}
-                                >
-                                  {tt.configureAutomation}
-                                </button>
-                              )}
-
-                              {/* Edit Query (automated risks) */}
-                              {risk.determination === 'automated' && (
-                                <button
-                                  className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    navigate(`/admin/risks/${risk.id}/configure-automation`);
-                                  }}
-                                >
-                                  {tt.editQuery}
-                                </button>
-                              )}
-
-                              {/* Activate Query (automated + inactive) */}
-                              {risk.determination === 'automated' && risk.automationStatus === 'inactive' && (
-                                <button
-                                  className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                  onClick={() => {
-                                    handleToggleStatus(risk.id);
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  {tt.activateQuery}
-                                </button>
-                              )}
-
-                              {/* Deactivate Query (automated + active) */}
-                              {risk.determination === 'automated' && risk.automationStatus === 'active' && (
-                                <button
-                                  className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                  onClick={() => {
-                                    handleToggleStatus(risk.id);
-                                    setOpenMenuId(null);
-                                  }}
-                                >
-                                  {tt.deactivateQuery}
-                                </button>
-                              )}
-
-                              {/* View Entities */}
-                              <button
-                                className={`w-full px-4 py-2 text-sm text-foreground hover:bg-muted ${isRTL ? 'text-right' : 'text-left'}`}
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  console.log('View entities:', risk.id);
-                                }}
-                              >
-                                {tt.viewEntities}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className={`flex items-center justify-between px-6 py-4 border-t border-border ${
-            isRTL ? 'flex-row-reverse' : 'flex-row'
-          }`}>
-            <div className="text-muted-foreground" style={{ fontSize: 'var(--text-sm)' }}>
-              {tt.showing} {startIndex + 1} {tt.to} {Math.min(endIndex, filteredRisks.length)} {tt.of} {filteredRisks.length} {tt.results}
-            </div>
-            <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-                className="px-4 py-2 border border-border rounded-lg bg-white hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-              >
-                {tt.previous}
-              </button>
-              <div className="flex items-center gap-1">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`w-10 h-10 rounded-lg transition-colors ${
-                      currentPage === page
-                        ? 'bg-primary text-white'
-                        : 'bg-white border border-border text-foreground hover:bg-muted'
-                    }`}
-                    style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+      <div className="bg-white rounded-xl border border-border overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
+            <thead className="bg-muted/40 border-b border-border">
+              <tr>
+                <th className="px-6 py-4 w-12">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={(checked) => toggleSelectAll(!!checked)}
+                  />
+                </th>
+                {[
+                  t('definedRisks.riskId'),
+                  t('definedRisks.riskName'),
+                  t('definedRisks.riskLevel'),
+                  t('definedRisks.businessDomain'),
+                  t('definedRisks.determination'),
+                  t('definedRisks.dateAdded'),
+                  t('definedRisks.action'),
+                ].map((label) => (
+                  <th
+                    key={label}
+                    className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}
                   >
-                    {page}
-                  </button>
+                    <span
+                      className="text-foreground"
+                      style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+                    >
+                      {label}
+                    </span>
+                  </th>
                 ))}
-              </div>
-              <button
-                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-                className="px-4 py-2 border border-border rounded-lg bg-white hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-              >
-                {tt.next}
-              </button>
-            </div>
-          </div>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {filteredRisks.map((risk) => (
+                <tr key={risk.id} className="hover:bg-muted/20 transition-colors">
+                  <td className="px-6 py-4">
+                    <Checkbox
+                      checked={selectedIds.has(risk.id)}
+                      onCheckedChange={() => toggleSelect(risk.id)}
+                    />
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className="text-foreground font-mono"
+                      style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                    >
+                      {risk.riskId}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 max-w-xs">
+                    <p
+                      className="text-foreground truncate"
+                      style={{ fontSize: 'var(--text-sm)' }}
+                      title={risk.fullTitle}
+                    >
+                      {risk.riskName}
+                    </p>
+                    <p
+                      className="text-muted-foreground truncate"
+                      style={{ fontSize: 'var(--text-xs)' }}
+                      title={risk.fullTitle}
+                    >
+                      {risk.fullTitle}
+                    </p>
+                  </td>
+                  <td className="px-6 py-4">{getRiskLevelBadge(risk.riskLevel)}</td>
+                  <td className="px-6 py-4">
+                    <Badge
+                      variant="outline"
+                      className="bg-gray-50 text-gray-700 border-gray-200"
+                      style={{ fontSize: 'var(--text-xs)' }}
+                    >
+                      {risk.businessDomain}
+                    </Badge>
+                  </td>
+                  <td className="px-6 py-4">{getStatusPill(risk)}</td>
+                  <td className="px-6 py-4">
+                    <span
+                      className="text-muted-foreground tabular-nums"
+                      style={{ fontSize: 'var(--text-sm)' }}
+                    >
+                      {risk.dateAdded}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <Button
+                      onClick={() => handleActivateAutomation(risk)}
+                      className="bg-primary hover:bg-primary/90 text-white h-9"
+                      style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                    >
+                      {risk.determination === 'automated'
+                        ? t('definedRisks.manageAutomation')
+                        : t('definedRisks.activateAutomation')}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : (
-        /* Empty State */
-        <div className="bg-white rounded-xl border border-border p-16 text-center">
-          <div className="flex flex-col items-center gap-4 max-w-md mx-auto">
-            <ShieldAlert className="w-12 h-12 text-muted-foreground" />
-            <h3 className="text-foreground" style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-              {tt.noData}
-            </h3>
-          </div>
-        </div>
-      )}
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-center gap-2 mt-6" dir="ltr">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          disabled={currentPage === 1}
+          className="h-9 w-9"
+        >
+          <ChevronDown className="w-4 h-4 rotate-90" />
+        </Button>
+        {pageNumbers().map((page, idx) => (
+          <Button
+            key={`${page}-${idx}`}
+            variant={typeof page === 'number' && page === currentPage ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => typeof page === 'number' && setCurrentPage(page)}
+            disabled={page === '...'}
+            className={`h-9 min-w-9 px-3 ${
+              typeof page === 'number' && page === currentPage
+                ? 'bg-transparent text-primary border-b-2 border-primary rounded-none hover:bg-transparent'
+                : ''
+            }`}
+            style={{
+              fontSize: 'var(--text-sm)',
+              fontWeight: typeof page === 'number' && page === currentPage ? 600 : 400,
+            }}
+          >
+            {page}
+          </Button>
+        ))}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages}
+          className="h-9 w-9"
+        >
+          <ChevronDown className="w-4 h-4 -rotate-90" />
+        </Button>
+      </div>
+
+      <AutoReplySettingsDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        question={activeQuestion}
+        context="risk"
+      />
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative py-3 flex items-center gap-2 transition-colors ${
+        active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+      }`}
+      style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+    >
+      <span>{label}</span>
+      <span
+        className={`inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full tabular-nums transition-colors ${
+          active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+        }`}
+        style={{ fontSize: '11px', fontWeight: 600 }}
+      >
+        {count}
+      </span>
+      {active && (
+        <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary rounded-full" />
+      )}
+    </button>
   );
 }
