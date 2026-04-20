@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import svgPaths from '@/imports/svg-xfywb401kf';
-import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert } from 'lucide-react';
+import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert, UsersRound } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useLanguage } from '@/app/contexts/language-context';
 
@@ -151,54 +151,33 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
         <div className="relative shrink-0 w-full z-[1]">
           <div className="flex flex-col size-full">
             <div className="flex flex-col gap-[4px] pb-[80px] px-[16px] pt-[32px] w-full">
-              
-              {/* مصادر البيانات - Data Sources Section */}
+
+              {/* إدارة المستخدمين - User Management (parent) */}
               <NavItem
-                icon={<Database className="w-4 h-4" />}
-                label={isRTL ? 'مصادر البيانات' : 'Data Sources'}
-                isActive={activeItem === 'data-sources'}
-                onClick={() => {
-                  handleItemClick('data-sources');
-                  navigate('/admin/data-sources');
-                }}
+                icon={<Users className="w-4 h-4" />}
+                label={isRTL ? 'إدارة المستخدمين' : 'User Management'}
+                hasChildren
+                isExpanded={expandedSections.has('user-management')}
+                onClick={() => toggleSection('user-management')}
                 isRTL={isRTL}
               />
 
-              {/* أتمتة الأسئلة - Question Automation */}
-              <NavItem
-                icon={<Zap className="w-4 h-4" />}
-                label={isRTL ? 'أتمتة الأسئلة' : 'Question Automation'}
-                isActive={activeItem === 'questions'}
-                onClick={() => {
-                  handleItemClick('questions');
-                  navigate('/admin/questions');
-                }}
-                isRTL={isRTL}
-              />
-
-              {/* المخاطر المحددة - Defined Risks */}
-              <NavItem
-                icon={<ShieldAlert className="w-4 h-4" />}
-                label={isRTL ? 'المخاطر المحددة' : 'Defined Risks'}
-                isActive={activeItem === 'risks'}
-                onClick={() => {
-                  handleItemClick('risks');
-                  navigate('/admin/risks');
-                }}
-                isRTL={isRTL}
-              />
-
-              {/* الاستعلامات - Queries Section */}
-              <NavItem
-                icon={<Search className="w-4 h-4" />}
-                label={isRTL ? 'الاستعلامات' : 'Queries'}
-                isActive={activeItem === 'queries'}
-                onClick={() => {
-                  handleItemClick('queries');
-                  navigate('/admin/queries');
-                }}
-                isRTL={isRTL}
-              />
+              {expandedSections.has('user-management') && (
+                <>
+                  {/* مجموعات المستخدمين - User Groups (child) */}
+                  <NavItem
+                    icon={<UsersRound className="w-4 h-4" />}
+                    label={isRTL ? 'مجموعات المستخدمين' : 'User Groups'}
+                    isChild
+                    isActive={activeItem === 'user-groups'}
+                    onClick={() => {
+                      handleItemClick('user-groups');
+                      navigate('/admin/user-groups');
+                    }}
+                    isRTL={isRTL}
+                  />
+                </>
+              )}
 
             </div>
           </div>

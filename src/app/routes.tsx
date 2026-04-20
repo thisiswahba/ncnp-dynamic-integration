@@ -19,6 +19,7 @@ import { QueryDetailsPage } from '@/app/pages/query-details-page';
 import { QueryPreviewPage } from '@/app/pages/query-preview-page';
 import { QueryHistoryPage } from '@/app/pages/query-history-page';
 import { ExecutionResultsPage } from '@/app/pages/execution-results-page';
+import { UserGroupsPage } from '@/app/pages/user-groups-page';
 import { Navigate } from 'react-router';
 
 export const router = createBrowserRouter([
@@ -113,6 +114,10 @@ export const router = createBrowserRouter([
           {
             path: 'queries/:id/edit',
             element: <CreateQueryPage />
+          },
+          {
+            path: 'user-groups',
+            element: <UserGroupsPage />
           }
         ]
       }
