@@ -1,98 +1,134 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import {
-  Plus,
-  ArrowRight,
+  Search,
+  Filter,
   ChevronDown,
-  ChevronUp,
+  Plus,
+  MoreVertical,
+  Pencil,
+  Power,
+  PowerOff,
   Trash2,
-  ClipboardCheck,
-  BadgeCheck,
-  Eye,
-  Briefcase,
-  FileSearch2,
-  FileCheck2,
-  CheckCircle2,
-  Info,
   UsersRound,
-  type LucideIcon,
 } from 'lucide-react';
+import { Button } from '@/app/components/ui/button';
+import { Checkbox } from '@/app/components/ui/checkbox';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/app/components/ui/alert-dialog';
 import { useLanguage } from '@/app/contexts/language-context';
-
-interface BusinessRole {
-  id: string;
-  name: string;
-  nameAr: string;
-  icon: LucideIcon;
-}
-
-interface IdmRole {
-  id: string;
-  name: string;
-  description: string;
-}
+import {
+  UserGroupEditSheet,
+  type UserGroupDraft,
+} from '@/app/components/user-group-edit-sheet';
 
 interface UserGroup {
   id: string;
   name: string;
+  idmRolesCount: number;
+  status: 'active' | 'inactive';
+  createdDate: string;
+  lastEditDate: string;
   mapping: Record<string, string>;
 }
 
-const BUSINESS_ROLES: BusinessRole[] = [
-  { id: 'r1', name: 'Execution Reviewer', nameAr: 'مراجع التنفيذ', icon: ClipboardCheck },
-  { id: 'r2', name: 'Execution Approver', nameAr: 'معتمد التنفيذ', icon: BadgeCheck },
-  { id: 'r3', name: 'Onsite Evaluation Supervisor', nameAr: 'مشرف التقييم الميداني', icon: Eye },
-  { id: 'r4', name: 'Onsite Evaluation Manager', nameAr: 'مدير التقييم الميداني', icon: Briefcase },
-  { id: 'r5', name: 'Corrective Action Evidence Reviewer', nameAr: 'مراجع أدلة الإجراءات التصحيحية', icon: FileSearch2 },
-  { id: 'r6', name: 'Corrective Action Plan Approver', nameAr: 'معتمد خطة الإجراءات التصحيحية', icon: FileCheck2 },
-];
-
-const IDM_ROLES: IdmRole[] = [
-  { id: 'idm-1', name: 'idm.execution.reviewer', description: 'Execution review access' },
-  { id: 'idm-2', name: 'idm.execution.approver', description: 'Execution approval rights' },
-  { id: 'idm-3', name: 'idm.onsite.supervisor', description: 'Field supervision' },
-  { id: 'idm-4', name: 'idm.onsite.manager', description: 'Field management' },
-  { id: 'idm-5', name: 'idm.corrective.reviewer', description: 'Corrective action review' },
-  { id: 'idm-6', name: 'idm.corrective.approver', description: 'Corrective action approval' },
-  { id: 'idm-7', name: 'idm.audit.advisor', description: 'External audit advisor' },
-];
-
 const initialGroups: UserGroup[] = [
   {
-    id: 'g1',
+    id: '#001',
     name: 'Compliance Team',
+    idmRolesCount: 6,
+    status: 'active',
+    createdDate: '12/03/2026',
+    lastEditDate: '18/04/2026',
+    mapping: {
+      r1: 'idm-1',
+      r2: 'idm-2',
+      r3: 'idm-3',
+      r4: 'idm-4',
+      r5: 'idm-5',
+      r6: 'idm-6',
+    },
+  },
+  {
+    id: '#002',
+    name: 'Regional Reviewers',
+    idmRolesCount: 4,
+    status: 'active',
+    createdDate: '05/03/2026',
+    lastEditDate: '15/04/2026',
     mapping: { r1: 'idm-1', r2: 'idm-2', r3: 'idm-3', r4: 'idm-4' },
   },
+  {
+    id: '#003',
+    name: 'Executive Approvers',
+    idmRolesCount: 3,
+    status: 'active',
+    createdDate: '28/02/2026',
+    lastEditDate: '12/04/2026',
+    mapping: { r2: 'idm-2', r3: 'idm-3', r6: 'idm-6' },
+  },
+  {
+    id: '#004',
+    name: 'Audit Advisors',
+    idmRolesCount: 1,
+    status: 'inactive',
+    createdDate: '20/02/2026',
+    lastEditDate: '08/04/2026',
+    mapping: { r1: 'idm-7' },
+  },
 ];
+
+type TabKey = 'all' | 'active' | 'inactive';
+
+type ConfirmKind =
+  | { kind: 'delete'; groupId: string }
+  | { kind: 'toggle'; groupId: string; nextStatus: 'active' | 'inactive' }
+  | null;
 
 export function UserGroupsPage() {
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
 
   const [groups, setGroups] = useState<UserGroup[]>(initialGroups);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(initialGroups.map((g) => g.id)));
-  const [justMapped, setJustMapped] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const addGroup = () => {
-    const newId = `g${Date.now()}`;
-    setGroups((prev) => [...prev, { id: newId, name: '', mapping: {} }]);
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      next.add(newId);
-      return next;
-    });
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [editingDraft, setEditingDraft] = useState<UserGroupDraft | null>(null);
+
+  const [confirm, setConfirm] = useState<ConfirmKind>(null);
+
+  const counts = {
+    all: groups.length,
+    active: groups.filter((g) => g.status === 'active').length,
+    inactive: groups.filter((g) => g.status === 'inactive').length,
   };
 
-  const deleteGroup = (id: string) => {
-    setGroups((prev) => prev.filter((g) => g.id !== id));
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  const filteredGroups = groups.filter((g) => {
+    const matchesTab = activeTab === 'all' || g.status === activeTab;
+    const matchesSearch =
+      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.id.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesTab && matchesSearch;
+  });
+
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) setSelectedIds(new Set(filteredGroups.map((g) => g.id)));
+    else setSelectedIds(new Set());
   };
 
-  const toggleExpand = (id: string) => {
-    setExpandedIds((prev) => {
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -100,98 +136,518 @@ export function UserGroupsPage() {
     });
   };
 
-  const updateName = (id: string, name: string) => {
-    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, name } : g)));
+  const allSelected = filteredGroups.length > 0 && selectedIds.size === filteredGroups.length;
+
+  const openCreate = () => {
+    setEditingDraft({ name: '', mapping: {} });
+    setSheetOpen(true);
   };
 
-  const updateMapping = (groupId: string, roleId: string, idmId: string) => {
-    setGroups((prev) =>
-      prev.map((g) => {
-        if (g.id !== groupId) return g;
-        const nextMapping = { ...g.mapping };
-        if (idmId) nextMapping[roleId] = idmId;
-        else delete nextMapping[roleId];
-        return { ...g, mapping: nextMapping };
-      })
-    );
-    if (idmId) {
-      const key = `${groupId}:${roleId}`;
-      setJustMapped(key);
-      window.setTimeout(() => setJustMapped(null), 600);
+  const openEdit = (group: UserGroup) => {
+    setEditingDraft({ id: group.id, name: group.name, mapping: group.mapping });
+    setSheetOpen(true);
+    setOpenMenuId(null);
+  };
+
+  const handleSaveDraft = (draft: UserGroupDraft) => {
+    if (draft.id) {
+      // edit
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === draft.id
+            ? {
+                ...g,
+                name: draft.name,
+                mapping: draft.mapping,
+                idmRolesCount: Object.keys(draft.mapping).length,
+                lastEditDate: today(),
+              }
+            : g
+        )
+      );
+      toast.success(t('userGroups.toast.success'), { description: t('userGroups.toast.updated') });
+    } else {
+      // create
+      const newId = `#${String(groups.length + 1).padStart(3, '0')}`;
+      const newGroup: UserGroup = {
+        id: newId,
+        name: draft.name,
+        mapping: draft.mapping,
+        idmRolesCount: Object.keys(draft.mapping).length,
+        status: 'active',
+        createdDate: today(),
+        lastEditDate: today(),
+      };
+      setGroups((prev) => [newGroup, ...prev]);
+      toast.success(t('userGroups.toast.success'), { description: t('userGroups.toast.created') });
     }
   };
 
+  const handleConfirm = () => {
+    if (!confirm) return;
+    if (confirm.kind === 'delete') {
+      setGroups((prev) => prev.filter((g) => g.id !== confirm.groupId));
+      toast.success(t('userGroups.toast.success'), { description: t('userGroups.toast.deleted') });
+    } else if (confirm.kind === 'toggle') {
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === confirm.groupId
+            ? { ...g, status: confirm.nextStatus, lastEditDate: today() }
+            : g
+        )
+      );
+      toast.success(t('userGroups.toast.success'), {
+        description:
+          confirm.nextStatus === 'active'
+            ? t('userGroups.toast.enabled')
+            : t('userGroups.toast.disabled'),
+      });
+    }
+    setConfirm(null);
+  };
+
+  const pageNumbers = () => [1] as (number | string)[];
+
   return (
-    <div className="px-8 py-6 max-w-7xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div
+      className="px-8 py-6 max-w-7xl mx-auto"
+      dir={isRTL ? 'rtl' : 'ltr'}
+      onClick={() => setOpenMenuId(null)}
+    >
       {/* Header */}
-      <div className={`mb-6 ${isRTL ? 'text-right' : 'text-left'}`}>
-        <p
-          className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1"
-        >
-          {t('userGroups.eyebrow')}
-        </p>
-        <h1
-          className="text-foreground"
-          style={{ fontSize: 'var(--text-3xl)', fontWeight: 700, letterSpacing: '-0.01em' }}
-        >
-          {t('userGroups.title')}
-        </h1>
-        <p className="text-muted-foreground mt-1" style={{ fontSize: 'var(--text-sm)' }}>
-          {t('userGroups.subtitle')}
-        </p>
-      </div>
-
-      {/* Helper banner */}
-      <div className="flex items-start gap-2 p-3 mb-6 rounded-lg bg-blue-50 border border-blue-100">
-        <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-        <p
-          className={`text-blue-900 flex-1 ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-xs)', lineHeight: 1.5 }}
-        >
-          {t('userGroups.pageHelper')}
-        </p>
-      </div>
-
-      {/* Groups OR Empty state */}
-      {groups.length > 0 ? (
-        <>
-          <div className="space-y-4">
-            {groups.map((group, idx) => (
-              <GroupCard
-                key={group.id}
-                group={group}
-                index={idx}
-                expanded={expandedIds.has(group.id)}
-                onToggle={() => toggleExpand(group.id)}
-                onDelete={() => deleteGroup(group.id)}
-                onNameChange={(n) => updateName(group.id, n)}
-                onMappingChange={(roleId, idmId) => updateMapping(group.id, roleId, idmId)}
-                justMapped={justMapped}
-                isRTL={isRTL}
-                t={t}
-              />
-            ))}
-          </div>
-
-          {/* Add Group CTA */}
-          <button
-            type="button"
-            onClick={addGroup}
-            className="w-full mt-4 py-4 rounded-2xl border border-dashed border-border bg-white hover:border-primary/40 hover:bg-primary/5 transition-all flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
-            style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+      <div className="flex items-start justify-between mb-6">
+        <div className={isRTL ? 'text-right' : 'text-left'}>
+          <p
+            className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1"
           >
-            <Plus className="w-4 h-4" />
-            {t('userGroups.createNew')}
-          </button>
-        </>
+            {t('userGroups.eyebrow')}
+          </p>
+          <h1
+            className="text-foreground"
+            style={{ fontSize: 'var(--text-3xl)', fontWeight: 700, letterSpacing: '-0.01em' }}
+          >
+            {t('userGroups.title')}
+          </h1>
+          <p className="text-muted-foreground mt-1" style={{ fontSize: 'var(--text-sm)' }}>
+            {t('userGroups.subtitle')}
+          </p>
+        </div>
+        <Button
+          onClick={openCreate}
+          className="h-11 px-5 flex items-center gap-2"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+        >
+          <Plus className="w-4 h-4" />
+          {t('userGroups.createNew')}
+        </Button>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-border mb-6">
+        <div className="flex gap-6">
+          <TabButton
+            active={activeTab === 'all'}
+            onClick={() => setActiveTab('all')}
+            label={t('userGroups.tabs.all')}
+            count={counts.all}
+          />
+          <TabButton
+            active={activeTab === 'active'}
+            onClick={() => setActiveTab('active')}
+            label={t('userGroups.tabs.active')}
+            count={counts.active}
+          />
+          <TabButton
+            active={activeTab === 'inactive'}
+            onClick={() => setActiveTab('inactive')}
+            label={t('userGroups.tabs.inactive')}
+            count={counts.inactive}
+          />
+        </div>
+      </div>
+
+      {/* Search + Filter */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1">
+          <Search
+            className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'right-4' : 'left-4'}`}
+          />
+          <input
+            type="text"
+            placeholder={t('userGroups.searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className={`w-full h-12 bg-white border border-border rounded-lg outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-foreground placeholder:text-muted-foreground transition-colors ${isRTL ? 'pr-11 pl-4 text-right' : 'pl-11 pr-4 text-left'}`}
+            style={{ fontSize: 'var(--text-sm)' }}
+          />
+        </div>
+        <button
+          type="button"
+          className="h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center gap-2 text-foreground"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+        >
+          <Filter className="w-4 h-4" />
+          <span>{t('userGroups.filter')}</span>
+          <ChevronDown className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Entries count */}
+      <div className={`mb-3 ${isRTL ? 'text-right' : 'text-left'}`}>
+        <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+          {t('userGroups.entriesInTable')}:{' '}
+        </span>
+        <span className="text-primary" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+          {filteredGroups.length}
+        </span>
+      </div>
+
+      {/* Table or empty */}
+      {filteredGroups.length > 0 ? (
+        <div className="bg-white rounded-xl border border-border overflow-hidden shadow-sm">
+          <div className="overflow-x-auto overflow-y-visible">
+            <table className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
+              <thead className="bg-muted/40 border-b border-border">
+                <tr>
+                  <th className="px-6 py-4 w-12">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={(c) => toggleSelectAll(!!c)}
+                    />
+                  </th>
+                  {[
+                    t('userGroups.col.id'),
+                    t('userGroups.col.name'),
+                    t('userGroups.col.idmRoles'),
+                    t('userGroups.col.status'),
+                    t('userGroups.col.createdDate'),
+                    t('userGroups.col.lastEditDate'),
+                    t('userGroups.col.actions'),
+                  ].map((label) => (
+                    <th
+                      key={label}
+                      className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}
+                    >
+                      <span
+                        className="text-foreground uppercase"
+                        style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em' }}
+                      >
+                        {label}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredGroups.map((group) => (
+                  <tr key={group.id} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(group.id)}
+                        onCheckedChange={() => toggleSelect(group.id)}
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className="text-foreground font-mono"
+                        style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+                      >
+                        {group.id}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => openEdit(group)}
+                        className={`text-primary hover:text-primary/80 transition-colors hover:underline ${isRTL ? 'text-right' : 'text-left'}`}
+                        style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+                      >
+                        {group.name}
+                      </button>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className="inline-flex items-center justify-center min-w-7 h-6 px-2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-mono tabular-nums"
+                        style={{ fontSize: '11px', fontWeight: 600 }}
+                      >
+                        {group.idmRolesCount}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatusPill status={group.status} t={t} />
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className="text-muted-foreground tabular-nums"
+                        style={{ fontSize: 'var(--text-sm)' }}
+                      >
+                        {group.createdDate}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className="text-muted-foreground tabular-nums"
+                        style={{ fontSize: 'var(--text-sm)' }}
+                      >
+                        {group.lastEditDate}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() =>
+                            setOpenMenuId(openMenuId === group.id ? null : group.id)
+                          }
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                        {openMenuId === group.id && (
+                          <div
+                            className={`absolute z-50 mt-1 w-48 rounded-lg border border-border bg-white shadow-lg overflow-hidden ${isRTL ? 'left-0' : 'right-0'}`}
+                          >
+                            <MenuItem
+                              icon={<Pencil className="w-4 h-4" />}
+                              label={t('userGroups.action.edit')}
+                              onClick={() => openEdit(group)}
+                              isRTL={isRTL}
+                            />
+                            {group.status === 'active' ? (
+                              <MenuItem
+                                icon={<PowerOff className="w-4 h-4 text-amber-600" />}
+                                label={t('userGroups.action.disable')}
+                                onClick={() => {
+                                  setConfirm({
+                                    kind: 'toggle',
+                                    groupId: group.id,
+                                    nextStatus: 'inactive',
+                                  });
+                                  setOpenMenuId(null);
+                                }}
+                                isRTL={isRTL}
+                              />
+                            ) : (
+                              <MenuItem
+                                icon={<Power className="w-4 h-4 text-emerald-600" />}
+                                label={t('userGroups.action.enable')}
+                                onClick={() => {
+                                  setConfirm({
+                                    kind: 'toggle',
+                                    groupId: group.id,
+                                    nextStatus: 'active',
+                                  });
+                                  setOpenMenuId(null);
+                                }}
+                                isRTL={isRTL}
+                              />
+                            )}
+                            <div className="border-t border-border" />
+                            <MenuItem
+                              icon={<Trash2 className="w-4 h-4 text-destructive" />}
+                              label={t('userGroups.action.delete')}
+                              onClick={() => {
+                                setConfirm({ kind: 'delete', groupId: group.id });
+                                setOpenMenuId(null);
+                              }}
+                              isRTL={isRTL}
+                              danger
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
-        <EmptyState onCreate={addGroup} t={t} />
+        <EmptyState onCreate={openCreate} t={t} />
       )}
+
+      {/* Pagination */}
+      {filteredGroups.length > 0 && (
+        <div className="flex items-center justify-center gap-2 mt-6" dir="ltr">
+          <Button variant="ghost" size="sm" disabled className="h-9 min-w-9 px-3">
+            <ChevronDown className="w-4 h-4 rotate-90" />
+          </Button>
+          {pageNumbers().map((page) => (
+            <Button
+              key={String(page)}
+              variant="default"
+              size="sm"
+              className="h-9 min-w-9 px-3 bg-transparent text-primary border-b-2 border-primary rounded-none hover:bg-transparent"
+              style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+            >
+              {page}
+            </Button>
+          ))}
+          <Button variant="ghost" size="sm" disabled className="h-9 min-w-9 px-3">
+            <ChevronDown className="w-4 h-4 -rotate-90" />
+          </Button>
+        </div>
+      )}
+
+      {/* Edit/Create sheet */}
+      <UserGroupEditSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        initial={editingDraft}
+        onSave={handleSaveDraft}
+      />
+
+      {/* Confirm dialog */}
+      <AlertDialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
+        <AlertDialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={isRTL ? 'text-right' : 'text-left'}>
+              {confirm?.kind === 'delete'
+                ? t('userGroups.confirm.deleteTitle')
+                : confirm?.nextStatus === 'inactive'
+                  ? t('userGroups.confirm.disableTitle')
+                  : t('userGroups.confirm.enableTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription className={isRTL ? 'text-right' : 'text-left'}>
+              {confirm?.kind === 'delete'
+                ? t('userGroups.confirm.deleteDesc')
+                : confirm?.nextStatus === 'inactive'
+                  ? t('userGroups.confirm.disableDesc')
+                  : t('userGroups.confirm.enableDesc')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('userGroups.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirm}
+              className={
+                confirm?.kind === 'delete'
+                  ? 'bg-destructive text-white hover:bg-destructive/90'
+                  : ''
+              }
+            >
+              {confirm?.kind === 'delete'
+                ? t('userGroups.action.delete')
+                : confirm?.nextStatus === 'inactive'
+                  ? t('userGroups.action.disable')
+                  : t('userGroups.action.enable')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }
 
-// ── Empty State ───────────────────────────────────────────────────────────────
+function today() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function StatusPill({
+  status,
+  t,
+}: {
+  status: 'active' | 'inactive';
+  t: (k: string) => string;
+}) {
+  if (status === 'active') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100"
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        <span className="relative flex w-1.5 h-1.5">
+          <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+          <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        </span>
+        {t('userGroups.status.active')}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-gray-100 text-gray-600 border border-gray-200"
+      style={{
+        fontSize: '11px',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+      }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+      {t('userGroups.status.inactive')}
+    </span>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  isRTL,
+  danger,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  isRTL: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full px-3 py-2 hover:bg-muted transition-colors flex items-center gap-2.5 ${isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'} ${danger ? 'text-destructive' : 'text-foreground'}`}
+      style={{ fontSize: 'var(--text-sm)' }}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`relative py-3 flex items-center gap-2 transition-colors ${
+        active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+      }`}
+      style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+    >
+      <span>{label}</span>
+      <span
+        className={`inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full tabular-nums transition-colors ${
+          active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+        }`}
+        style={{ fontSize: '11px', fontWeight: 600 }}
+      >
+        {count}
+      </span>
+      {active && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary rounded-full" />}
+    </button>
+  );
+}
 
 function EmptyState({ onCreate, t }: { onCreate: () => void; t: (k: string) => string }) {
   return (
@@ -220,253 +676,6 @@ function EmptyState({ onCreate, t }: { onCreate: () => void; t: (k: string) => s
         <Plus className="w-4 h-4" />
         {t('userGroups.createFirst')}
       </button>
-    </div>
-  );
-}
-
-// ── Group Card ────────────────────────────────────────────────────────────────
-
-function GroupCard({
-  group,
-  index,
-  expanded,
-  onToggle,
-  onDelete,
-  onNameChange,
-  onMappingChange,
-  justMapped,
-  isRTL,
-  t,
-}: {
-  group: UserGroup;
-  index: number;
-  expanded: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-  onNameChange: (n: string) => void;
-  onMappingChange: (roleId: string, idmId: string) => void;
-  justMapped: string | null;
-  isRTL: boolean;
-  t: (k: string) => string;
-}) {
-  const mappedCount = BUSINESS_ROLES.filter((r) => !!group.mapping[r.id]).length;
-  const totalRoles = BUSINESS_ROLES.length;
-  const coverage = totalRoles === 0 ? 0 : Math.round((mappedCount / totalRoles) * 100);
-  const isComplete = mappedCount === totalRoles;
-
-  return (
-    <section
-      className="bg-white rounded-2xl border border-border/70 overflow-hidden"
-    >
-      {/* Header row */}
-      <div className="px-5 py-5">
-        <div className="flex items-start gap-4">
-          <div
-            className="shrink-0 w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-mono font-semibold mt-6"
-            style={{ fontSize: 'var(--text-sm)' }}
-          >
-            {index + 1}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <label
-              className={`block mb-1.5 uppercase text-muted-foreground font-semibold ${isRTL ? 'text-right' : 'text-left'}`}
-              style={{ fontSize: '10px', letterSpacing: '0.12em' }}
-            >
-              {t('userGroups.groupName')}
-            </label>
-            <input
-              type="text"
-              value={group.name}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder={t('userGroups.groupNamePlaceholder')}
-              className={`w-full h-11 bg-white border border-border/70 rounded-xl px-4 text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
-              style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-            />
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0 mt-6">
-            <button
-              type="button"
-              onClick={onDelete}
-              title={t('userGroups.deleteGroup')}
-              className="h-10 w-10 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={onToggle}
-              title={expanded ? t('userGroups.collapse') : t('userGroups.expand')}
-              className="h-10 w-10 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Coverage meter */}
-        <div className="flex items-center gap-2 mt-4">
-          <span
-            className="uppercase text-muted-foreground font-semibold"
-            style={{ fontSize: '10px', letterSpacing: '0.12em' }}
-          >
-            {t('userGroups.coverage')}
-          </span>
-          <div className="flex-1 max-w-[280px] relative h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className={`absolute inset-y-0 ${isRTL ? 'right-0' : 'left-0'} bg-primary rounded-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]`}
-              style={{ width: `${coverage}%` }}
-            />
-          </div>
-          <span
-            className="text-muted-foreground font-mono tabular-nums"
-            style={{ fontSize: '11px' }}
-            dir="ltr"
-          >
-            <span className="text-foreground font-semibold">{mappedCount}</span>/{totalRoles}
-          </span>
-          {isComplete && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
-        </div>
-      </div>
-
-      {/* Mapping section */}
-      <div
-        className={`grid transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-        }`}
-      >
-        <div className="overflow-hidden min-h-0">
-          <div className="px-5 pb-5 pt-1 border-t border-border/60 space-y-2">
-            {BUSINESS_ROLES.map((role, i) => (
-              <MappingRow
-                key={role.id}
-                role={role}
-                mapped={group.mapping[role.id] ?? ''}
-                idmOptions={IDM_ROLES}
-                onChange={(v) => onMappingChange(role.id, v)}
-                justMapped={justMapped === `${group.id}:${role.id}`}
-                index={i}
-                isRTL={isRTL}
-                t={t}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ── Mapping Row ───────────────────────────────────────────────────────────────
-
-function MappingRow({
-  role,
-  mapped,
-  idmOptions,
-  onChange,
-  justMapped,
-  index,
-  isRTL,
-  t,
-}: {
-  role: BusinessRole;
-  mapped: string;
-  idmOptions: IdmRole[];
-  onChange: (v: string) => void;
-  justMapped: boolean;
-  index: number;
-  isRTL: boolean;
-  t: (k: string) => string;
-}) {
-  const isMapped = !!mapped;
-  const Icon = role.icon;
-
-  const RoleCell = (
-    <div className="flex items-center gap-3 min-w-0">
-      <span
-        className={`shrink-0 w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
-          isMapped ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'
-        }`}
-      >
-        <Icon className="w-5 h-5" />
-      </span>
-      <div className={`min-w-0 flex-1 ${isRTL ? 'text-right' : 'text-left'}`}>
-        <p
-          className="text-foreground truncate"
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
-        >
-          {role.name}
-        </p>
-        <p className="text-muted-foreground truncate" style={{ fontSize: '11px' }}>
-          {role.nameAr}
-        </p>
-      </div>
-    </div>
-  );
-
-  const BridgeCell = (
-    <div className="relative flex items-center justify-center">
-      <div
-        className={`h-px w-10 transition-colors duration-300 ${
-          isMapped ? 'bg-emerald-400' : 'bg-border'
-        }`}
-      />
-      <div
-        className={`absolute w-7 h-7 rounded-full border-2 bg-white flex items-center justify-center transition-all duration-300 ${
-          isMapped ? 'border-emerald-400 scale-100' : 'border-border/60 border-dashed scale-95'
-        }`}
-      >
-        <ArrowRight
-          className={`w-3.5 h-3.5 transition-colors ${
-            isMapped ? 'text-emerald-600' : 'text-muted-foreground'
-          } ${isRTL ? '-scale-x-100' : ''}`}
-        />
-      </div>
-    </div>
-  );
-
-  const DropdownCell = (
-    <div className="relative">
-      <select
-        value={mapped}
-        onChange={(e) => onChange(e.target.value)}
-        dir="ltr"
-        className={`w-full h-10 px-3 pr-9 rounded-lg bg-white font-mono appearance-none outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors text-left ${
-          isMapped
-            ? 'border border-emerald-200 text-emerald-900 focus:border-emerald-400'
-            : 'border border-border text-muted-foreground'
-        }`}
-        style={{ fontSize: 'var(--text-xs)' }}
-      >
-        <option value="">{t('userGroups.selectIdm')}</option>
-        {idmOptions.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        className="absolute top-1/2 -translate-y-1/2 right-3 w-4 h-4 text-muted-foreground pointer-events-none"
-      />
-    </div>
-  );
-
-  return (
-    <div
-      data-just-mapped={justMapped ? 'true' : undefined}
-      className={`group relative grid grid-cols-[1fr_auto_1fr] items-center gap-4
-                 rounded-xl border px-4 py-3 transition-all duration-200
-                 data-[just-mapped=true]:animate-[pulse-ring_0.6s_ease-out]
-                 ${
-                   isMapped
-                     ? 'bg-emerald-50/40 border-emerald-200/60 hover:bg-emerald-50/60'
-                     : 'bg-muted/20 border-dashed border-border hover:bg-muted/40 hover:border-border'
-                 }`}
-    >
-      {RoleCell}
-      {BridgeCell}
-      {DropdownCell}
     </div>
   );
 }
