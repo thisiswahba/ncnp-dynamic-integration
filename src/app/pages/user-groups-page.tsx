@@ -86,8 +86,6 @@ const initialGroups: UserGroup[] = [
   },
 ];
 
-type TabKey = 'all' | 'active' | 'inactive';
-
 type ConfirmKind =
   | { kind: 'delete'; groupId: string }
   | { kind: 'toggle'; groupId: string; nextStatus: 'active' | 'inactive' }
@@ -99,7 +97,6 @@ export function UserGroupsPage() {
 
   const [groups, setGroups] = useState<UserGroup[]>(initialGroups);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -108,19 +105,11 @@ export function UserGroupsPage() {
 
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
 
-  const counts = {
-    all: groups.length,
-    active: groups.filter((g) => g.status === 'active').length,
-    inactive: groups.filter((g) => g.status === 'inactive').length,
-  };
-
-  const filteredGroups = groups.filter((g) => {
-    const matchesTab = activeTab === 'all' || g.status === activeTab;
-    const matchesSearch =
+  const filteredGroups = groups.filter(
+    (g) =>
       g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
+      g.id.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const toggleSelectAll = (checked: boolean) => {
     if (checked) setSelectedIds(new Set(filteredGroups.map((g) => g.id)));
@@ -240,30 +229,6 @@ export function UserGroupsPage() {
           <Plus className="w-4 h-4" />
           {t('userGroups.createNew')}
         </Button>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-border mb-6">
-        <div className="flex gap-6">
-          <TabButton
-            active={activeTab === 'all'}
-            onClick={() => setActiveTab('all')}
-            label={t('userGroups.tabs.all')}
-            count={counts.all}
-          />
-          <TabButton
-            active={activeTab === 'active'}
-            onClick={() => setActiveTab('active')}
-            label={t('userGroups.tabs.active')}
-            count={counts.active}
-          />
-          <TabButton
-            active={activeTab === 'inactive'}
-            onClick={() => setActiveTab('inactive')}
-            label={t('userGroups.tabs.inactive')}
-            count={counts.inactive}
-          />
-        </div>
       </div>
 
       {/* Search + Filter */}
@@ -545,48 +510,6 @@ function today() {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function StatusPill({
-  status,
-  t,
-}: {
-  status: 'active' | 'inactive';
-  t: (k: string) => string;
-}) {
-  if (status === 'active') {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100"
-        style={{
-          fontSize: '11px',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-        }}
-      >
-        <span className="relative flex w-1.5 h-1.5">
-          <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-          <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
-        </span>
-        {t('userGroups.status.active')}
-      </span>
-    );
-  }
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 px-2.5 h-6 rounded-full bg-gray-100 text-gray-600 border border-gray-200"
-      style={{
-        fontSize: '11px',
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-      }}
-    >
-      <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-      {t('userGroups.status.inactive')}
-    </span>
-  );
-}
-
 function MenuItem({
   icon,
   label,
@@ -608,39 +531,6 @@ function MenuItem({
     >
       {icon}
       <span>{label}</span>
-    </button>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative py-3 flex items-center gap-2 transition-colors ${
-        active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-      }`}
-      style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
-    >
-      <span>{label}</span>
-      <span
-        className={`inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full tabular-nums transition-colors ${
-          active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-        }`}
-        style={{ fontSize: '11px', fontWeight: 600 }}
-      >
-        {count}
-      </span>
-      {active && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary rounded-full" />}
     </button>
   );
 }
