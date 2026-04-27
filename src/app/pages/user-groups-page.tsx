@@ -319,7 +319,6 @@ export function UserGroupsPage() {
                     t('userGroups.col.id'),
                     t('userGroups.col.name'),
                     t('userGroups.col.idmRoles'),
-                    t('userGroups.col.status'),
                     t('userGroups.col.createdDate'),
                     t('userGroups.col.lastEditDate'),
                     t('userGroups.col.actions'),
@@ -371,9 +370,6 @@ export function UserGroupsPage() {
                       >
                         {group.idmRolesCount}
                       </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatusPill status={group.status} t={t} />
                     </td>
                     <td className="px-6 py-4">
                       <span
