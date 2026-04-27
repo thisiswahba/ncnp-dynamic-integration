@@ -7,13 +7,10 @@ import {
   Plus,
   MoreVertical,
   Pencil,
-  Power,
-  PowerOff,
   Trash2,
   UsersRound,
 } from 'lucide-react';
 import { Button } from '@/app/components/ui/button';
-import { Checkbox } from '@/app/components/ui/checkbox';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,10 +83,7 @@ const initialGroups: UserGroup[] = [
   },
 ];
 
-type ConfirmKind =
-  | { kind: 'delete'; groupId: string }
-  | { kind: 'toggle'; groupId: string; nextStatus: 'active' | 'inactive' }
-  | null;
+type ConfirmKind = { kind: 'delete'; groupId: string } | null;
 
 export function UserGroupsPage() {
   const { language, t } = useLanguage();
@@ -97,7 +91,6 @@ export function UserGroupsPage() {
 
   const [groups, setGroups] = useState<UserGroup[]>(initialGroups);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -110,22 +103,6 @@ export function UserGroupsPage() {
       g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       g.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const toggleSelectAll = (checked: boolean) => {
-    if (checked) setSelectedIds(new Set(filteredGroups.map((g) => g.id)));
-    else setSelectedIds(new Set());
-  };
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const allSelected = filteredGroups.length > 0 && selectedIds.size === filteredGroups.length;
 
   const openCreate = () => {
     setEditingDraft({ name: '', mapping: {} });
@@ -177,20 +154,6 @@ export function UserGroupsPage() {
     if (confirm.kind === 'delete') {
       setGroups((prev) => prev.filter((g) => g.id !== confirm.groupId));
       toast.success(t('userGroups.toast.success'), { description: t('userGroups.toast.deleted') });
-    } else if (confirm.kind === 'toggle') {
-      setGroups((prev) =>
-        prev.map((g) =>
-          g.id === confirm.groupId
-            ? { ...g, status: confirm.nextStatus, lastEditDate: today() }
-            : g
-        )
-      );
-      toast.success(t('userGroups.toast.success'), {
-        description:
-          confirm.nextStatus === 'active'
-            ? t('userGroups.toast.enabled')
-            : t('userGroups.toast.disabled'),
-      });
     }
     setConfirm(null);
   };
@@ -274,12 +237,6 @@ export function UserGroupsPage() {
             <table className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  <th className="px-6 py-4 w-12">
-                    <Checkbox
-                      checked={allSelected}
-                      onCheckedChange={(c) => toggleSelectAll(!!c)}
-                    />
-                  </th>
                   {[
                     t('userGroups.col.id'),
                     t('userGroups.col.name'),
@@ -305,12 +262,6 @@ export function UserGroupsPage() {
               <tbody className="divide-y divide-border">
                 {filteredGroups.map((group) => (
                   <tr key={group.id} className="hover:bg-muted/20 transition-colors">
-                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(group.id)}
-                        onCheckedChange={() => toggleSelect(group.id)}
-                      />
-                    </td>
                     <td className="px-6 py-4">
                       <span
                         className="text-foreground font-mono"
@@ -374,35 +325,6 @@ export function UserGroupsPage() {
                               onClick={() => openEdit(group)}
                               isRTL={isRTL}
                             />
-                            {group.status === 'active' ? (
-                              <MenuItem
-                                icon={<PowerOff className="w-4 h-4 text-amber-600" />}
-                                label={t('userGroups.action.disable')}
-                                onClick={() => {
-                                  setConfirm({
-                                    kind: 'toggle',
-                                    groupId: group.id,
-                                    nextStatus: 'inactive',
-                                  });
-                                  setOpenMenuId(null);
-                                }}
-                                isRTL={isRTL}
-                              />
-                            ) : (
-                              <MenuItem
-                                icon={<Power className="w-4 h-4 text-emerald-600" />}
-                                label={t('userGroups.action.enable')}
-                                onClick={() => {
-                                  setConfirm({
-                                    kind: 'toggle',
-                                    groupId: group.id,
-                                    nextStatus: 'active',
-                                  });
-                                  setOpenMenuId(null);
-                                }}
-                                isRTL={isRTL}
-                              />
-                            )}
                             <div className="border-t border-border" />
                             <MenuItem
                               icon={<Trash2 className="w-4 h-4 text-destructive" />}
@@ -459,40 +381,24 @@ export function UserGroupsPage() {
         onSave={handleSaveDraft}
       />
 
-      {/* Confirm dialog */}
+      {/* Confirm delete dialog */}
       <AlertDialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
         <AlertDialogContent dir={isRTL ? 'rtl' : 'ltr'}>
           <AlertDialogHeader>
             <AlertDialogTitle className={isRTL ? 'text-right' : 'text-left'}>
-              {confirm?.kind === 'delete'
-                ? t('userGroups.confirm.deleteTitle')
-                : confirm?.nextStatus === 'inactive'
-                  ? t('userGroups.confirm.disableTitle')
-                  : t('userGroups.confirm.enableTitle')}
+              {t('userGroups.confirm.deleteTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription className={isRTL ? 'text-right' : 'text-left'}>
-              {confirm?.kind === 'delete'
-                ? t('userGroups.confirm.deleteDesc')
-                : confirm?.nextStatus === 'inactive'
-                  ? t('userGroups.confirm.disableDesc')
-                  : t('userGroups.confirm.enableDesc')}
+              {t('userGroups.confirm.deleteDesc')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('userGroups.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirm}
-              className={
-                confirm?.kind === 'delete'
-                  ? 'bg-destructive text-white hover:bg-destructive/90'
-                  : ''
-              }
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
-              {confirm?.kind === 'delete'
-                ? t('userGroups.action.delete')
-                : confirm?.nextStatus === 'inactive'
-                  ? t('userGroups.action.disable')
-                  : t('userGroups.action.enable')}
+              {t('userGroups.action.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
