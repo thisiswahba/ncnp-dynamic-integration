@@ -20,6 +20,7 @@ import { QueryPreviewPage } from '@/app/pages/query-preview-page';
 import { QueryHistoryPage } from '@/app/pages/query-history-page';
 import { ExecutionResultsPage } from '@/app/pages/execution-results-page';
 import { UserGroupsPage } from '@/app/pages/user-groups-page';
+import { QuestionCreatorPage } from '@/app/pages/question-creator-page';
 import { Navigate } from 'react-router';
 
 export const router = createBrowserRouter([
@@ -74,6 +75,14 @@ export const router = createBrowserRouter([
           {
             path: 'questions',
             element: <QuestionAutomationPage />
+          },
+          {
+            path: 'questions/new',
+            element: <QuestionCreatorPage />
+          },
+          {
+            path: 'questions/:id/edit',
+            element: <QuestionCreatorPage />
           },
           {
             path: 'questions/:id/configure-automation',
