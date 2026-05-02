@@ -212,12 +212,12 @@ export function UserGroupsPage() {
 
   return (
     <div
-      className="px-8 py-6 max-w-7xl mx-auto"
+      className="px-4 md:px-8 py-4 md:py-6 max-w-7xl mx-auto"
       dir={isRTL ? 'rtl' : 'ltr'}
       onClick={() => setOpenMenuId(null)}
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5 md:mb-6">
         <div className={isRTL ? 'text-right' : 'text-left'}>
           <p
             className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1"
@@ -226,7 +226,7 @@ export function UserGroupsPage() {
           </p>
           <h1
             className="text-foreground"
-            style={{ fontSize: 'var(--text-3xl)', fontWeight: 700, letterSpacing: '-0.01em' }}
+            style={{ fontSize: 'clamp(20px, 5vw, var(--text-3xl))', fontWeight: 700, letterSpacing: '-0.01em' }}
           >
             {t('userGroups.title')}
           </h1>
@@ -236,7 +236,7 @@ export function UserGroupsPage() {
         </div>
         <Button
           onClick={openCreate}
-          className="h-11 px-5 flex items-center gap-2"
+          className="h-11 px-5 flex items-center gap-2 self-start md:self-auto shrink-0"
           style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
         >
           <Plus className="w-4 h-4" />
@@ -245,7 +245,7 @@ export function UserGroupsPage() {
       </div>
 
       {/* Search + Filter */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4">
         <div className="relative flex-1">
           <Search
             className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'right-4' : 'left-4'}`}
@@ -261,7 +261,7 @@ export function UserGroupsPage() {
         </div>
         <button
           type="button"
-          className="h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center gap-2 text-foreground"
+          className="h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-center gap-2 text-foreground shrink-0"
           style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
         >
           <Filter className="w-4 h-4" />

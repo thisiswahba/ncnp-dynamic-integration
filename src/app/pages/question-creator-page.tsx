@@ -229,9 +229,9 @@ export function QuestionCreatorPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-[calc(100vh-73px)] bg-[#f7f8f9]" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="max-w-[1240px] mx-auto px-8 py-10">
+      <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-10">
         {/* Header row */}
-        <div className="flex items-start justify-between gap-6 mb-8">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 md:gap-6 mb-6 md:mb-8">
           <div className="min-w-0">
             {/* Breadcrumb */}
             <button
@@ -255,17 +255,17 @@ export function QuestionCreatorPage() {
             </div>
             <h1
               className="text-foreground mt-1"
-              style={{ fontSize: '38px', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.05 }}
+              style={{ fontSize: 'clamp(24px, 6vw, 38px)', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.05 }}
             >
               {t('questionCreator.title')}
             </h1>
           </div>
 
-          <div className={`flex items-center gap-3 shrink-0 ${isRTL ? 'flex-row-reverse' : ''}`}>
+          <div className={`flex items-center gap-2 md:gap-3 shrink-0 flex-wrap ${isRTL ? 'flex-row-reverse' : ''}`}>
             <Button
               variant="outline"
               onClick={() => toast.success(t('questionCreator.toast.draftSaved'))}
-              className="h-10 px-4 bg-white border-border"
+              className="h-10 px-3 md:px-4 bg-white border-border flex-1 md:flex-none"
               style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
             >
               <span>{t('questionCreator.saveDraft')}</span>
@@ -273,7 +273,7 @@ export function QuestionCreatorPage() {
             </Button>
             <Button
               onClick={() => toast.success(t('questionCreator.toast.sentForReview'))}
-              className="h-10 px-5 bg-primary hover:bg-primary/90 text-white shadow-sm shadow-primary/20"
+              className="h-10 px-3 md:px-5 bg-primary hover:bg-primary/90 text-white shadow-sm shadow-primary/20 flex-1 md:flex-none"
               style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
             >
               {t('questionCreator.sendForReview')}
@@ -306,7 +306,7 @@ export function QuestionCreatorPage() {
           {rootQuestions.length === 0 ? (
             <EmptyCanvas onAdd={openCreateRootQuestion} t={t} isRTL={isRTL} />
           ) : (
-            <div className="px-10 pt-12 pb-16">
+            <div className="px-4 md:px-10 pt-8 md:pt-12 pb-10 md:pb-16 overflow-x-auto">
               <div className="flex flex-col items-center">
                 {rootQuestions.map((q, idx) => (
                   <div key={q.id} className="flex flex-col items-center w-full">
