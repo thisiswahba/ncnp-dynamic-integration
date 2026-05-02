@@ -52,3 +52,248 @@
   0% { box-shadow: 0 0 0 0 rgba(22, 101, 52, 0.35); }
   100% { box-shadow: 0 0 0 16px rgba(22, 101, 52, 0); }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Question Creator — branching tree canvas                                     */
+/* Editorial L-shape connectors with intentional rhythm.                        */
+/* ──────────────────────────────────────────────────────────────────────────── */
+
+/* Paper-feel canvas with a sub-grid */
+.qc-canvas {
+  --qc-line: rgba(16, 122, 90, 0.32);
+  --qc-line-soft: rgba(16, 122, 90, 0.18);
+  --qc-line-dashed: rgba(100, 116, 139, 0.45);
+  --qc-grid: rgba(16, 122, 90, 0.045);
+  background-color: #fbfcfb;
+  background-image:
+    radial-gradient(circle at 0 0, rgba(16, 122, 90, 0.05) 0, transparent 65%),
+    radial-gradient(circle at 100% 100%, rgba(16, 122, 90, 0.04) 0, transparent 60%),
+    linear-gradient(var(--qc-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--qc-grid) 1px, transparent 1px);
+  background-size:
+    auto, auto,
+    32px 32px,
+    32px 32px;
+  background-position: 0 0, 100% 100%, -1px -1px, -1px -1px;
+}
+
+/* Trunk: vertical line below a question card, before its branch row */
+.qc-trunk {
+  width: 1px;
+  height: 28px;
+  background: var(--qc-line);
+  margin: 0 auto;
+}
+
+/* Trunk variant for sub-question entry (smaller) */
+.qc-trunk-sub {
+  width: 1px;
+  height: 22px;
+  background: var(--qc-line);
+  margin: 0 auto;
+}
+
+/* Branch row: contains the branch cells, each with its connector pseudo */
+.qc-branches {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0; /* gap is inside cells via padding */
+  position: relative;
+}
+
+/* Each branch cell paints its own L-shape (top half-bar + vertical drop) */
+.qc-cell {
+  position: relative;
+  padding: 22px 14px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* Horizontal half-bar at top of cell */
+.qc-cell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  height: 1px;
+  background: var(--qc-line);
+  left: 0;
+  right: 0;
+}
+
+/* Vertical drop from top center to top of card */
+.qc-cell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 22px;
+  background: var(--qc-line);
+  transform: translateX(-50%);
+}
+
+/* First / last / only adjustments */
+.qc-cell[data-pos='first']::before { left: 50%; right: 0; }
+.qc-cell[data-pos='last']::before  { left: 0;   right: 50%; }
+.qc-cell[data-pos='only']::before  { display: none; }
+
+/* Dashed style for the "+ Add new option" cell */
+.qc-cell[data-dashed='true']::before {
+  background: transparent;
+  border-top: 1px dashed var(--qc-line-dashed);
+}
+.qc-cell[data-dashed='true']::after {
+  background: transparent;
+  border-left: 1px dashed var(--qc-line-dashed);
+}
+
+/* Question card layered atmosphere */
+.qc-question-card {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(250, 252, 251, 1) 100%);
+  box-shadow:
+    0 1px 0 rgba(15, 23, 42, 0.04),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px -16px rgba(15, 23, 42, 0.16);
+}
+.qc-question-card[data-sub='true'] {
+  background:
+    linear-gradient(180deg, rgba(240, 253, 244, 0.55) 0%, rgba(247, 252, 249, 0.95) 100%);
+}
+
+/* Subtle ring accent for cards */
+.qc-question-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+
+/* Answer pill */
+.qc-answer-pill {
+  background: #ffffff;
+  box-shadow:
+    0 1px 0 rgba(15, 23, 42, 0.03),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+.qc-answer-pill:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(15, 23, 42, 0.04),
+    0 6px 16px -10px rgba(15, 23, 42, 0.2);
+}
+
+/* Ghost "+ Add" button */
+.qc-ghost {
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.qc-ghost:hover .qc-ghost-circle {
+  transform: scale(1.05);
+  border-color: rgba(16, 122, 90, 0.6);
+  background: rgba(16, 122, 90, 0.06);
+}
+.qc-ghost:hover .qc-ghost-icon {
+  color: rgb(16, 122, 90);
+}
+.qc-ghost:hover .qc-ghost-label {
+  color: rgb(15, 23, 42);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Empty-canvas card — minimalist start screen                                  */
+/* "+" + Tap to add new questions, centered card.                               */
+/* ──────────────────────────────────────────────────────────────────────────── */
+.qc-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 360px;
+  max-width: 100%;
+  padding: 40px 56px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  cursor: pointer;
+}
+
+.qc-empty-card:hover {
+  border-color: rgba(21, 94, 52, 0.4);
+  box-shadow: 0 6px 18px -6px rgba(21, 94, 52, 0.18);
+  transform: translateY(-1px);
+}
+
+.qc-empty-icon {
+  width: 24px;
+  height: 24px;
+  color: #155e34;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.qc-empty-card:hover .qc-empty-icon {
+  transform: scale(1.08);
+}
+
+.qc-empty-label {
+  font-size: var(--text-sm);
+  color: rgba(15, 23, 42, 0.55);
+  transition: color 200ms ease;
+}
+
+.qc-empty-card:hover .qc-empty-label {
+  color: rgba(15, 23, 42, 0.85);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Toggle — single canonical style                                              */
+/* Flat physical pill: cream-gray track + matte forest-green thumb (NCNP).      */
+/* No gradients, no highlights — pure brand color blocks.                       */
+/* ──────────────────────────────────────────────────────────────────────────── */
+.hw-toggle {
+  --tk-w: 56px;
+  --tk-h: 28px;
+  --tk-pad: 4px;
+  --th-w: 28px;
+  --th-h: 20px;
+  width: var(--tk-w);
+  height: var(--tk-h);
+  border-radius: 9999px;
+  padding: var(--tk-pad);
+  background: #d4d8dd;
+  transition: background-color 200ms ease;
+  position: relative;
+}
+
+.hw-toggle .hw-toggle-thumb {
+  width: var(--th-w);
+  height: var(--th-h);
+  border-radius: 9999px;
+  background: #94a3b8;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color 220ms ease;
+  transform: translateX(0);
+}
+
+.hw-toggle[data-state='checked'] .hw-toggle-thumb {
+  /* 56 - 4 - 4 - 28 = 20 */
+  transform: translateX(20px);
+  background: #155e34; /* NCNP forest green */
+}
+
+/* RTL: thumb travels in the opposite direction. */
+[dir='rtl'] .hw-toggle[data-state='checked'] .hw-toggle-thumb {
+  transform: translateX(-20px);
+}
+

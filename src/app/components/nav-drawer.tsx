@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import svgPaths from '@/imports/svg-xfywb401kf';
-import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert, UsersRound } from 'lucide-react';
+import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert, UsersRound, ListChecks, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useLanguage } from '@/app/contexts/language-context';
 
@@ -173,6 +173,33 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
                     onClick={() => {
                       handleItemClick('user-groups');
                       navigate('/admin/user-groups');
+                    }}
+                    isRTL={isRTL}
+                  />
+                </>
+              )}
+
+              {/* بنك الأسئلة - Question Bank (parent) */}
+              <NavItem
+                icon={<ListChecks className="w-4 h-4" />}
+                label={isRTL ? 'بنك الأسئلة' : 'Question Bank'}
+                hasChildren
+                isExpanded={expandedSections.has('question-bank')}
+                onClick={() => toggleSection('question-bank')}
+                isRTL={isRTL}
+              />
+
+              {expandedSections.has('question-bank') && (
+                <>
+                  {/* إنشاء سؤال جديد - New Question (child) */}
+                  <NavItem
+                    icon={<PlusCircle className="w-4 h-4" />}
+                    label={isRTL ? 'إنشاء سؤال جديد' : 'New Question'}
+                    isChild
+                    isActive={activeItem === 'questions-new'}
+                    onClick={() => {
+                      handleItemClick('questions-new');
+                      navigate('/admin/questions/new');
                     }}
                     isRTL={isRTL}
                   />

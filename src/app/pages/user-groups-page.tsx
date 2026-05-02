@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Search,
   Filter,
   ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
   Plus,
   MoreVertical,
   Pencil,
@@ -85,6 +87,15 @@ const initialGroups: UserGroup[] = [
 
 type ConfirmKind = { kind: 'delete'; groupId: string } | null;
 
+type SortField = 'id' | 'name' | 'idmRolesCount' | 'createdDate' | 'lastEditDate';
+type SortOrder = 'asc' | 'desc';
+
+// Stored as DD/MM/YYYY → convert to a sortable timestamp for numeric comparison.
+function parseDate(d: string): number {
+  const [dd, mm, yyyy] = d.split('/');
+  return new Date(`${yyyy}-${mm}-${dd}`).getTime();
+}
+
 export function UserGroupsPage() {
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
@@ -98,11 +109,50 @@ export function UserGroupsPage() {
 
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
 
-  const filteredGroups = groups.filter(
-    (g) =>
-      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Sort state — null field means original order.
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Same column: toggle asc → desc → cleared
+      if (sortOrder === 'asc') setSortOrder('desc');
+      else {
+        setSortField(null);
+        setSortOrder('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const filteredGroups = useMemo(() => {
+    const filtered = groups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        g.id.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    if (!sortField) return filtered;
+    const sorted = [...filtered].sort((a, b) => {
+      let av: number | string;
+      let bv: number | string;
+      if (sortField === 'idmRolesCount') {
+        av = a.idmRolesCount;
+        bv = b.idmRolesCount;
+      } else if (sortField === 'createdDate' || sortField === 'lastEditDate') {
+        av = parseDate(a[sortField]);
+        bv = parseDate(b[sortField]);
+      } else {
+        av = a[sortField].toLowerCase();
+        bv = b[sortField].toLowerCase();
+      }
+      if (av < bv) return sortOrder === 'asc' ? -1 : 1;
+      if (av > bv) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [groups, searchQuery, sortField, sortOrder]);
 
   const openCreate = () => {
     setEditingDraft({ name: '', mapping: {} });
@@ -162,12 +212,12 @@ export function UserGroupsPage() {
 
   return (
     <div
-      className="px-8 py-6 max-w-7xl mx-auto"
+      className="px-4 md:px-8 py-4 md:py-6 max-w-7xl mx-auto"
       dir={isRTL ? 'rtl' : 'ltr'}
       onClick={() => setOpenMenuId(null)}
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-5 md:mb-6">
         <div className={isRTL ? 'text-right' : 'text-left'}>
           <p
             className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1"
@@ -176,7 +226,7 @@ export function UserGroupsPage() {
           </p>
           <h1
             className="text-foreground"
-            style={{ fontSize: 'var(--text-3xl)', fontWeight: 700, letterSpacing: '-0.01em' }}
+            style={{ fontSize: 'clamp(20px, 5vw, var(--text-3xl))', fontWeight: 700, letterSpacing: '-0.01em' }}
           >
             {t('userGroups.title')}
           </h1>
@@ -186,7 +236,7 @@ export function UserGroupsPage() {
         </div>
         <Button
           onClick={openCreate}
-          className="h-11 px-5 flex items-center gap-2"
+          className="h-11 px-5 flex items-center gap-2 self-start md:self-auto shrink-0"
           style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
         >
           <Plus className="w-4 h-4" />
@@ -195,7 +245,7 @@ export function UserGroupsPage() {
       </div>
 
       {/* Search + Filter */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4">
         <div className="relative flex-1">
           <Search
             className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'right-4' : 'left-4'}`}
@@ -211,7 +261,7 @@ export function UserGroupsPage() {
         </div>
         <button
           type="button"
-          className="h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center gap-2 text-foreground"
+          className="h-12 px-4 bg-white border border-border rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-center gap-2 text-foreground shrink-0"
           style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
         >
           <Filter className="w-4 h-4" />
@@ -237,24 +287,34 @@ export function UserGroupsPage() {
             <table className="w-full" dir={isRTL ? 'rtl' : 'ltr'}>
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  {[
-                    t('userGroups.col.id'),
-                    t('userGroups.col.name'),
-                    t('userGroups.col.idmRoles'),
-                    t('userGroups.col.createdDate'),
-                    t('userGroups.col.lastEditDate'),
-                    t('userGroups.col.actions'),
-                  ].map((label) => (
+                  {([
+                    { field: 'id', label: t('userGroups.col.id') },
+                    { field: 'name', label: t('userGroups.col.name') },
+                    { field: 'idmRolesCount', label: t('userGroups.col.idmRoles') },
+                    { field: 'createdDate', label: t('userGroups.col.createdDate') },
+                    { field: 'lastEditDate', label: t('userGroups.col.lastEditDate') },
+                    { field: null, label: t('userGroups.col.actions') },
+                  ] as { field: SortField | null; label: string }[]).map(({ field, label }) => (
                     <th
                       key={label}
                       className={`px-6 py-4 ${isRTL ? 'text-right' : 'text-left'}`}
                     >
-                      <span
-                        className="text-foreground uppercase"
-                        style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em' }}
-                      >
-                        {label}
-                      </span>
+                      {field ? (
+                        <SortableHeader
+                          label={label}
+                          active={sortField === field}
+                          order={sortOrder}
+                          onClick={() => handleSort(field)}
+                          isRTL={isRTL}
+                        />
+                      ) : (
+                        <span
+                          className="text-foreground uppercase"
+                          style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em' }}
+                        >
+                          {label}
+                        </span>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -414,6 +474,50 @@ function today() {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const yyyy = d.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
+}
+
+function SortableHeader({
+  label,
+  active,
+  order,
+  onClick,
+  isRTL,
+}: {
+  label: string;
+  active: boolean;
+  order: SortOrder;
+  onClick: () => void;
+  isRTL: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group inline-flex items-center gap-1.5 hover:text-primary transition-colors ${isRTL ? 'flex-row-reverse' : ''}`}
+      aria-sort={active ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <span
+        className={`uppercase ${active ? 'text-primary' : 'text-foreground'}`}
+        style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em' }}
+      >
+        {label}
+      </span>
+      <span
+        className={`shrink-0 inline-flex items-center justify-center w-4 h-4 ${active ? 'text-primary' : 'text-muted-foreground/60 group-hover:text-muted-foreground'}`}
+        aria-hidden
+      >
+        {active ? (
+          order === 'asc' ? (
+            <ChevronUp className="w-3.5 h-3.5" strokeWidth={2.5} />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5" strokeWidth={2.5} />
+          )
+        ) : (
+          <ChevronsUpDown className="w-3.5 h-3.5" strokeWidth={2} />
+        )}
+      </span>
+    </button>
+  );
 }
 
 function MenuItem({
