@@ -5,13 +5,9 @@ import {
   Link2,
   Hash,
   Check,
-  Paperclip,
-  Lock,
 } from 'lucide-react';
 import { Sheet, SheetContent } from '@/app/components/ui/sheet';
-import { Button } from '@/app/components/ui/button';
 import { Checkbox } from '@/app/components/ui/checkbox';
-import { HwToggle } from '@/app/components/ui/hw-toggle';
 import { useLanguage } from '@/app/contexts/language-context';
 import type {
   AnswerType,
@@ -99,19 +95,14 @@ export function AnswerSettingsSheet({ open, onOpenChange, initial, question, onS
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRTL ? 'left' : 'right'}
-        className="sm:max-w-[460px] w-full p-0 grid grid-rows-[auto_1fr_auto] gap-0"
+        className="sm:max-w-[360px] w-full p-0 grid grid-rows-[auto_1fr_auto] gap-0 rounded-none"
         dir={isRTL ? 'rtl' : 'ltr'}
       >
-        {/* Header */}
-        <div className="px-6 pt-6 pb-5 border-b border-border/60 bg-muted/30">
-          <p
-            className={`text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-medium mb-1.5 ${isRTL ? 'text-right' : 'text-left'}`}
-          >
-            {t('as.eyebrow')}
-          </p>
+        {/* Header — flat gray bar matching Figma */}
+        <div className="px-4 h-[51px] flex items-center bg-[#f8f9fa] border-b border-border/40">
           <h2
             className={`text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
-            style={{ fontSize: '20px', lineHeight: 1.2, fontWeight: 600 }}
+            style={{ fontSize: '16px', lineHeight: '20px', fontWeight: 500 }}
           >
             {t('as.title')}
           </h2>
@@ -119,7 +110,7 @@ export function AnswerSettingsSheet({ open, onOpenChange, initial, question, onS
 
         {/* Body */}
         <div className="overflow-y-auto">
-          <div className="px-6 py-6 space-y-5">
+          <div className="px-4 py-4 space-y-4">
             {isText ? (
               <TextAnswerForm
                 draft={draft}
@@ -140,40 +131,33 @@ export function AnswerSettingsSheet({ open, onOpenChange, initial, question, onS
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer — Delete (red text) + Save button matching Figma */}
         <div
-          className={`px-6 py-4 border-t border-border/60 bg-card/80 backdrop-blur-sm flex items-center justify-between gap-2`}
+          className={`px-4 py-4 flex items-center justify-between gap-2 ${isRTL ? 'flex-row-reverse' : ''}`}
         >
           {isEditing && onDelete ? (
             <button
               type="button"
               onClick={handleDelete}
-              className="text-rose-600 hover:text-rose-700 font-medium transition-colors"
-              style={{ fontSize: 'var(--text-sm)' }}
+              className="text-[#b42318] hover:text-[#9a1c14] font-medium transition-colors"
+              style={{ fontSize: '14px', lineHeight: '19px' }}
             >
               {t('as.delete')}
             </button>
           ) : (
             <span />
           )}
-          <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : ''}`}>
-            <Button
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="h-9 px-4 font-medium"
-              style={{ fontSize: 'var(--text-sm)' }}
-            >
-              {t('as.cancel')}
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!canSave}
-              className="h-9 px-5 font-medium bg-primary hover:bg-primary/90 text-white"
-              style={{ fontSize: 'var(--text-sm)' }}
-            >
-              {t('as.save')}
-            </Button>
-          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canSave}
+            className={`h-8 w-[122px] rounded text-white font-medium transition-opacity ${
+              canSave ? 'bg-primary hover:opacity-90' : 'bg-primary opacity-50 cursor-not-allowed'
+            }`}
+            style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 500 }}
+          >
+            {t('as.save')}
+          </button>
         </div>
       </SheetContent>
     </Sheet>
@@ -199,7 +183,7 @@ function TextAnswerForm({
       <div>
         <label
           className={`block mb-2 text-foreground font-semibold ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-sm)' }}
+          style={{ fontSize: '14px', lineHeight: '20px' }}
         >
           {t('as.field.answerType')}
         </label>
@@ -229,7 +213,7 @@ function TextAnswerForm({
       </div>
 
       {/* Allow attachment */}
-      <div className="border-t border-border/60 pt-5">
+      <div className="border-t border-border/60 pt-4">
         <label
           className={`flex items-center gap-2 cursor-pointer ${isRTL ? 'flex-row-reverse justify-end' : ''}`}
         >
@@ -237,11 +221,15 @@ function TextAnswerForm({
             checked={!!draft.requireAttachment}
             onCheckedChange={(v) => update('requireAttachment', !!v)}
           />
-          <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+          <span
+            className="text-black"
+            style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 500 }}
+          >
             {t('as.allowAttachment')}
           </span>
         </label>
       </div>
+      <div className="border-t border-border/60" />
     </>
   );
 }
@@ -263,29 +251,21 @@ function AnswerTypeRow({
     <button
       type="button"
       onClick={onClick}
-      className={`w-full rounded-xl border px-4 py-3 transition-all ${
-        selected
-          ? 'border-emerald-300 bg-emerald-50/40'
-          : 'border-border bg-white hover:border-border/80 hover:bg-muted/40'
-      }`}
+      className="w-full rounded-lg border border-[#d2d6db] bg-white px-2 h-[46px] hover:border-border transition-colors"
     >
-      <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : ''}`}>
-        <span
-          className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
-            selected ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          <Icon className="w-4.5 h-4.5" />
+      <div className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : ''}`}>
+        <span className="shrink-0 w-6 h-6 rounded-full bg-[rgba(8,93,58,0.11)] text-emerald-700 flex items-center justify-center">
+          <Icon className="w-4 h-4" />
         </span>
         <span
-          className={`flex-1 text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+          className={`flex-1 text-black ${isRTL ? 'text-right' : 'text-left'}`}
+          style={{ fontSize: '12px', lineHeight: '16px', fontWeight: 500, letterSpacing: '0.5px' }}
         >
           {label}
         </span>
         {selected && (
-          <span className="shrink-0 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center">
-            <Check className="w-3 h-3" />
+          <span className={`shrink-0 text-primary ${isRTL ? 'me-2' : 'ms-2'}`}>
+            <Check className="w-4 h-4" strokeWidth={2.5} />
           </span>
         )}
       </div>
@@ -312,7 +292,7 @@ function ChoiceAnswerForm({
 }) {
   return (
     <>
-      {/* Label */}
+      {/* Label — flat gray bg matching Figma */}
       <div>
         <input
           type="text"
@@ -320,16 +300,16 @@ function ChoiceAnswerForm({
           onChange={(e) => update('text', e.target.value)}
           placeholder={t('as.field.labelPlaceholder')}
           autoFocus
-          className={`w-full h-11 bg-muted/40 border-0 rounded-lg px-4 text-foreground placeholder:text-muted-foreground/70 outline-none focus:bg-white focus:ring-2 focus:ring-primary/20 transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-sm)' }}
+          className={`w-full h-[45px] bg-[#f8f9fa] border border-[#f8f9fa] rounded-lg px-4 text-foreground placeholder:text-[#b3b3b3] outline-none focus:bg-white focus:border-border transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
+          style={{ fontSize: '12px' }}
         />
       </div>
 
       {/* Risk type */}
       <div>
         <label
-          className={`block mb-2 text-foreground font-semibold ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-sm)' }}
+          className={`block mb-2 text-foreground font-medium ${isRTL ? 'text-right' : 'text-left'}`}
+          style={{ fontSize: '14px', lineHeight: '20px' }}
         >
           {t('as.field.riskType')}
         </label>
@@ -337,8 +317,8 @@ function ChoiceAnswerForm({
           <select
             value={draft.riskType ?? ''}
             onChange={(e) => update('riskType', e.target.value || undefined)}
-            className={`w-full h-11 px-4 pr-10 rounded-lg border border-border bg-white text-foreground appearance-none outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors ${isRTL ? 'text-right pl-10 pr-4' : 'text-left'}`}
-            style={{ fontSize: 'var(--text-sm)' }}
+            className={`w-full h-10 px-4 ${isRTL ? 'pl-10' : 'pr-10'} rounded border border-[#9da4ae] bg-white text-foreground appearance-none outline-none focus:border-primary transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
+            style={{ fontSize: '14px' }}
           >
             <option value="">{t('as.field.riskTypePlaceholder')}</option>
             {RISK_TYPES.map((r) => (
@@ -348,7 +328,7 @@ function ChoiceAnswerForm({
             ))}
           </select>
           <ChevronDown
-            className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'left-3' : 'right-3'}`}
+            className={`absolute top-1/2 -translate-y-1/2 w-5 h-5 text-foreground pointer-events-none ${isRTL ? 'left-3' : 'right-3'}`}
           />
         </div>
       </div>
@@ -356,8 +336,8 @@ function ChoiceAnswerForm({
       {/* Score % */}
       <div>
         <label
-          className={`block mb-2 text-foreground font-semibold ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: 'var(--text-sm)' }}
+          className={`block mb-2 text-foreground font-medium ${isRTL ? 'text-right' : 'text-left'}`}
+          style={{ fontSize: '14px', lineHeight: '20px' }}
         >
           {t('as.field.scorePct')}
         </label>
@@ -374,44 +354,20 @@ function ChoiceAnswerForm({
               )
             }
             placeholder={t('as.field.scorePctPlaceholder')}
-            className={`w-full h-11 px-4 rounded-lg border border-border bg-white text-foreground placeholder:text-muted-foreground/70 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors ${isRTL ? 'text-right pl-10' : 'text-left pr-10'}`}
-            style={{ fontSize: 'var(--text-sm)' }}
+            className={`w-full h-10 px-4 rounded border border-[#9da4ae] bg-white text-foreground placeholder:text-[#d2d6db] outline-none focus:border-primary transition-colors ${isRTL ? 'text-right pl-10' : 'text-left pr-10'}`}
+            style={{ fontSize: '14px' }}
           />
           <span
-            className={`absolute top-1/2 -translate-y-1/2 text-muted-foreground ${isRTL ? 'left-4' : 'right-4'}`}
-            style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+            className={`absolute top-1/2 -translate-y-1/2 text-[#161616] ${isRTL ? 'left-4' : 'right-4'}`}
+            style={{ fontSize: '14px', fontWeight: 700 }}
           >
             %
           </span>
         </div>
       </div>
 
-      {/* Per-answer attachment (Bug 102680) */}
-      {showPerAnswerAttachment && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-4 py-3">
-          <div className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : ''}`}>
-            <span className="shrink-0 w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center">
-              {lockedByAll ? <Lock className="w-4 h-4" /> : <Paperclip className="w-4 h-4" />}
-            </span>
-            <div className={`flex-1 min-w-0 ${isRTL ? 'text-right' : 'text-left'}`}>
-              <p className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
-                {t('as.requireAttachment')}
-              </p>
-              <p className="text-muted-foreground" style={{ fontSize: 'var(--text-xs)' }}>
-                {lockedByAll ? t('as.requireAttachment.lockedAll') : t('as.requireAttachment.desc')}
-              </p>
-            </div>
-            <HwToggle
-              checked={lockedByAll ? true : !!draft.requireAttachment}
-              disabled={lockedByAll}
-              onCheckedChange={(v) => update('requireAttachment', !!v)}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Are there actions */}
-      <div className="border-t border-border/60 pt-5 space-y-3">
+      <div className="border-t border-border/60 pt-4 space-y-3">
         <label
           className={`flex items-center gap-2 cursor-pointer ${isRTL ? 'flex-row-reverse justify-end' : ''}`}
         >
@@ -422,13 +378,16 @@ function ChoiceAnswerForm({
               if (!v) update('actionType', undefined);
             }}
           />
-          <span className="text-foreground" style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+          <span
+            className="text-black"
+            style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 500 }}
+          >
             {t('as.hasActions')}
           </span>
         </label>
 
         {draft.hasActions && (
-          <div className="ps-6 grid gap-2">
+          <div className={`grid gap-2 ${isRTL ? 'pe-7' : 'ps-7'}`}>
             <ActionRadio
               selected={draft.actionType === 'sub-question'}
               label={t('as.action.subQuestion')}
@@ -443,22 +402,22 @@ function ChoiceAnswerForm({
             />
 
             {draft.actionType === 'corrective' && (
-              <div className="grid gap-2 mt-2">
+              <div className="grid gap-2 mt-1">
                 <input
                   type="text"
                   value={draft.actionDetails ?? ''}
                   onChange={(e) => update('actionDetails', e.target.value)}
                   placeholder={t('as.action.detailsPlaceholder')}
-                  className={`w-full h-10 px-4 rounded-lg bg-muted/40 border-0 text-foreground placeholder:text-muted-foreground/70 outline-none focus:bg-white focus:ring-2 focus:ring-primary/20 transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
-                  style={{ fontSize: 'var(--text-sm)' }}
+                  className={`w-full h-[45px] bg-[#f8f9fa] border border-[#f8f9fa] rounded-lg px-3 text-foreground placeholder:text-[#b3b3b3] outline-none focus:bg-white focus:border-border transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
+                  style={{ fontSize: '12px' }}
                 />
                 <input
                   type="text"
                   value={draft.actionReason ?? ''}
                   onChange={(e) => update('actionReason', e.target.value)}
                   placeholder={t('as.action.reasonPlaceholder')}
-                  className={`w-full h-10 px-4 rounded-lg bg-muted/40 border-0 text-foreground placeholder:text-muted-foreground/70 outline-none focus:bg-white focus:ring-2 focus:ring-primary/20 transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
-                  style={{ fontSize: 'var(--text-sm)' }}
+                  className={`w-full h-[45px] bg-[#f8f9fa] border border-[#f8f9fa] rounded-lg px-3 text-foreground placeholder:text-[#b3b3b3] outline-none focus:bg-white focus:border-border transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
+                  style={{ fontSize: '12px' }}
                 />
                 <input
                   type="text"
@@ -466,14 +425,35 @@ function ChoiceAnswerForm({
                   onChange={(e) => update('actionUrl', e.target.value)}
                   placeholder={t('as.action.urlPlaceholder')}
                   dir="ltr"
-                  className={`w-full h-10 px-4 rounded-lg bg-muted/40 border-0 text-foreground placeholder:text-muted-foreground/70 outline-none focus:bg-white focus:ring-2 focus:ring-primary/20 transition-colors text-left`}
-                  style={{ fontSize: 'var(--text-sm)' }}
+                  className="w-full h-[45px] bg-[#f8f9fa] border border-[#f8f9fa] rounded-lg px-3 text-foreground placeholder:text-[#b3b3b3] outline-none focus:bg-white focus:border-border transition-colors text-left"
+                  style={{ fontSize: '12px' }}
                 />
               </div>
             )}
           </div>
         )}
       </div>
+
+      <div className="border-t border-border/60" />
+
+      {/* Per-answer attachment (Bug 102680) — simple checkbox style matching Figma text-form treatment */}
+      {showPerAnswerAttachment && (
+        <label
+          className={`flex items-center gap-2 cursor-pointer ${isRTL ? 'flex-row-reverse justify-end' : ''} ${lockedByAll ? 'opacity-70' : ''}`}
+        >
+          <Checkbox
+            checked={lockedByAll ? true : !!draft.requireAttachment}
+            disabled={lockedByAll}
+            onCheckedChange={(v) => update('requireAttachment', !!v)}
+          />
+          <span
+            className="text-black"
+            style={{ fontSize: '14px', lineHeight: '20px', fontWeight: 500 }}
+          >
+            {lockedByAll ? t('as.requireAttachment.lockedAll') : t('as.allowAttachment')}
+          </span>
+        </label>
+      )}
     </>
   );
 }
@@ -496,15 +476,15 @@ function ActionRadio({
       className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : ''}`}
     >
       <span
-        className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-          selected ? 'border-primary' : 'border-border'
+        className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center transition-colors ${
+          selected ? 'border-primary' : 'border-[#6c737f]'
         }`}
       >
-        {selected && <span className="w-2.5 h-2.5 rounded-full bg-primary" />}
+        {selected && <span className="w-3 h-3 rounded-full bg-primary" />}
       </span>
       <span
-        className="text-foreground"
-        style={{ fontSize: 'var(--text-sm)', fontWeight: selected ? 500 : 400 }}
+        className="text-[#161616]"
+        style={{ fontSize: '14px', lineHeight: '24px', fontWeight: 400 }}
       >
         {label}
       </span>
