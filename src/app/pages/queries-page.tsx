@@ -107,6 +107,8 @@ function mockPreloadedForQuery(query: Query): { question: AutoReplyQuestion; pre
             elementType: query.linkedType === 'question' ? 'Boolean' : 'Number',
             operator: query.linkedType === 'question' ? '=' : '>',
             value: query.linkedType === 'question' ? 'true' : '80',
+            // THEN — preloaded rule resolves to the first predefined answer
+            answerId: 'a1',
           },
         ],
         connectors: [],

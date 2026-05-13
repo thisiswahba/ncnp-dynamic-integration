@@ -85,6 +85,12 @@ interface Condition {
   /** Upper bound for range operators (BETWEEN / NOT BETWEEN). */
   value2?: string;
   /**
+   * THEN — id of the predefined answer this rule resolves to when its IF
+   * condition matches at runtime. Each If is an independent rule; the first
+   * rule whose IF matches wins and its THEN answer is returned.
+   */
+  answerId?: string;
+  /**
    * Manual parentheses grouping. Renders `(` before the condition when
    * `openParen` is true and `)` after when `closeParen` is true. Operates
    * purely on visual structure — `isConditionComplete` and inquiry logic
@@ -254,6 +260,9 @@ function isRangeOperator(operator?: string): boolean {
 
 function isConditionComplete(c: Condition): boolean {
   if (!c.domain || !c.source || !c.element || !c.operator) return false;
+  // THEN answer is also part of completeness — a rule without an outcome
+  // can't resolve to anything at runtime.
+  if (!c.answerId) return false;
   if (!valueRequiresInput(c.operator)) return true;
   if (isRangeOperator(c.operator)) return !!c.value && !!c.value2;
   return !!c.value;
@@ -820,17 +829,20 @@ export function AutoReplySettingsDialog({
   };
 
   /**
-   * BR 3.2 / 3.3 / 5.1 / 5.2 — Performs the (mocked) execution. In the
-   * current preview mode there is no popup and no real integration call;
-   * a valid query resolves directly to the first predefined answer so the
-   * admin can confirm structure. Real wiring will replace the body with a
+   * BR 3.2 / 3.3 / 5.1 / 5.2 — Performs the (mocked) execution. Walks the
+   * IF rules in order and resolves to the THEN answer of the first
+   * complete rule (preview mode). Real wiring will replace the body with a
    * call to the consuming module. The try/catch preserves the BR 5.1 path
    * (BNM 0 banner) for when a real failure does occur.
    */
   const runExecution = (_runtimeValues: Record<string, string>) => {
     try {
       void _runtimeValues; // reserved for the live integration call
-      const resolved = displayedAnswers[0];
+      // First rule whose IF is complete wins; THEN gives us the answer id.
+      const firstRule = expression.conditions.find(isConditionComplete);
+      const resolved = firstRule?.answerId
+        ? displayedAnswers.find((a) => a.id === firstRule.answerId)
+        : displayedAnswers[0];
       if (!resolved) {
         setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
         return;
@@ -1107,6 +1119,7 @@ export function AutoReplySettingsDialog({
                           isRTL={isRTL}
                           t={t}
                           isReadOnly={isReadOnly}
+                          answers={displayedAnswers}
                           errors={validationErrors}
                         />
                       )}
@@ -1970,6 +1983,8 @@ interface ExpressionEditorProps {
   isRTL: boolean;
   t: (key: string) => string;
   isReadOnly?: boolean;
+  /** Predefined Answers the THEN dropdown selects from. */
+  answers: AutoReplyAnswer[];
   /**
    * Active validation errors. The editor highlights the conditions referenced
    * by `conditionId` and shows the matching IEM message under them. Expression
@@ -1981,62 +1996,42 @@ interface ExpressionEditorProps {
 function ExpressionEditor(props: ExpressionEditorProps) {
   const { expression, addCondition, isRTL, t, isReadOnly, errors } = props;
   return (
-    <div className="flex flex-col gap-1">
-      {expression.conditions.map((condition, idx) => {
+    // Each If is a self-contained rule — no AND/OR connector between rules.
+    // Stack them as independent cards; at runtime the first IF whose condition
+    // matches wins, and its THEN answer is returned.
+    <div className="flex flex-col gap-3">
+      {expression.conditions.map((condition) => {
         const rowErrors = (errors ?? []).filter(
           (e) => e.scope === 'condition' && e.conditionId === condition.id
         );
         return (
-          <div key={condition.id}>
-            {idx > 0 && (
-              <Connector
-                connector={expression.connectors[idx - 1]}
-                onToggle={() => props.toggleConnector(idx - 1)}
-                isRTL={isRTL}
-              />
-            )}
-            <ConditionBlock
-              {...props}
-              condition={condition}
-              t={t}
-              rowErrors={rowErrors}
-            />
-          </div>
+          <ConditionBlock
+            key={condition.id}
+            {...props}
+            condition={condition}
+            t={t}
+            rowErrors={rowErrors}
+          />
         );
       })}
       {!isReadOnly && (
         <div
-          className={`flex items-center gap-2 pt-3 flex-wrap ${
+          className={`flex items-center gap-2 pt-2 flex-wrap ${
             isRTL ? 'flex-row-reverse' : 'flex-row'
           }`}
         >
-          <span
-            className="text-muted-foreground"
-            style={{ fontSize: 'var(--text-xs)' }}
-          >
-            {t('autoReply.editor.addAnotherIf')}
-          </span>
           <Button
             variant="outline"
             size="sm"
+            // `AND` is now an inert placeholder for the legacy API — the connector
+            // array is unused at render time; preserved so old expressions load.
             onClick={() => addCondition('AND')}
-            className={`h-7 px-2.5 flex items-center gap-1 bg-white/80 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-            style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
-            title={t('autoReply.editor.addIfAndTitle')}
+            className={`h-8 px-3 flex items-center gap-1.5 bg-white/80 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+            style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+            title={t('autoReply.editor.addAnotherIfTitle')}
           >
-            <Plus className="w-3 h-3" />
-            {t('autoReply.editor.ifAnd')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => addCondition('OR')}
-            className={`h-7 px-2.5 flex items-center gap-1 bg-white/80 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-            style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
-            title={t('autoReply.editor.addIfOrTitle')}
-          >
-            <Plus className="w-3 h-3" />
-            {t('autoReply.editor.ifOr')}
+            <Plus className="w-3.5 h-3.5" />
+            {t('autoReply.editor.addAnotherIf')}
           </Button>
         </div>
       )}
@@ -2091,6 +2086,7 @@ function ConditionBlock({
   t,
   isReadOnly,
   rowErrors,
+  answers,
 }: ConditionBlockProps) {
   const activeStep =
     !isReadOnly && openedPicker?.id === condition.id ? openedPicker.step : null;
@@ -2108,26 +2104,48 @@ function ConditionBlock({
 
   const hasError = !!rowErrors && rowErrors.length > 0;
   return (
-    <div className="flex flex-col gap-0">
+    // Self-contained IF rule card. No AND/OR connectors between rules —
+    // each card is independent and carries its own THEN answer mapping.
     <div
-      className={`group relative flex flex-wrap items-center gap-1.5 px-2 py-2 rounded-xl transition-colors ${
+      className={`group relative rounded-2xl bg-white/80 ring-1 ring-inset transition-colors ${
         hasError
-          ? 'bg-destructive/5 ring-1 ring-destructive/50 ring-inset hover:bg-destructive/[0.07]'
-          : 'hover:bg-white/70'
-      } ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+          ? 'ring-destructive/50 bg-destructive/5'
+          : 'ring-border/60 hover:ring-primary/20'
+      }`}
       aria-invalid={hasError || undefined}
     >
-      {/*
-        Every condition is its own "If" — multiple Ifs (each with its own
-        operator + value) joined by AND/OR connectors at the row boundaries.
-      */}
-      <span
-        className="text-muted-foreground px-1 font-mono italic"
-        style={{ fontSize: 'var(--text-sm)' }}
+      {/* IF header strip */}
+      <div
+        className={`flex items-center justify-between px-4 pt-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
       >
-        {t('autoReply.editor.if')}
-      </span>
+        <span
+          className="inline-flex items-center gap-1.5 text-primary font-mono uppercase"
+          style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em' }}
+        >
+          <span
+            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/15"
+            aria-hidden="true"
+          >
+            ?
+          </span>
+          {t('autoReply.editor.if')}
+        </span>
+        {!isReadOnly && (
+          <button
+            type="button"
+            onClick={() => removeCondition(condition.id)}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all duration-150"
+            aria-label={t('autoReply.editor.removeCondition')}
+          >
+            <CloseIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
 
+      {/* IF body — pills row */}
+      <div
+        className={`flex flex-wrap items-center gap-1.5 px-4 pb-3 pt-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      >
       {/* Open paren — manual grouping for Scenario 3 */}
       {condition.openParen && (
         <span
@@ -2267,9 +2285,9 @@ function ConditionBlock({
         </span>
       )}
 
-      {/* Trailing action cluster — paren toggles + remove */}
+      {/* Inline paren toggles — visible only when relevant in single-rule layouts */}
       {!isReadOnly && (
-        <div
+        <span
           className={`inline-flex items-center gap-0.5 ${isRTL ? 'mr-auto' : 'ml-auto'}`}
         >
           <button
@@ -2306,39 +2324,41 @@ function ConditionBlock({
           >
             )
           </button>
-          <button
-            type="button"
-            onClick={() => removeCondition(condition.id)}
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all duration-150"
-            aria-label={t('autoReply.editor.removeCondition')}
-          >
-            <CloseIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        </span>
       )}
-    </div>
+      </div>
 
-    {/* BR 2.1 / 2.2 — inline IEM messages for this condition */}
-    {hasError && (
-      <ul
-        className={`mt-1 mb-1 mx-2 space-y-0.5 ${isRTL ? 'text-right' : 'text-left'}`}
-        aria-live="polite"
-      >
-        {rowErrors!.map((err, idx) => (
-          <li
-            key={`${err.code}-${idx}`}
-            className={`text-destructive flex items-start gap-1.5 ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
-            style={{ fontSize: '11px' }}
-          >
-            <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
-            <span>
-              <span className="font-mono font-semibold mr-1.5">{err.code}</span>
-              {t(`autoReply.iem.${err.code}`)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    )}
+      {/* THEN section — answer the rule resolves to when its IF matches */}
+      <ThenSection
+        condition={condition}
+        answers={answers}
+        isRTL={isRTL}
+        isReadOnly={!!isReadOnly}
+        onChange={(answerId) => updateCondition(condition.id, { answerId })}
+        t={t}
+      />
+
+      {/* BR 2.1 / 2.2 — inline IEM messages for this condition */}
+      {hasError && (
+        <ul
+          className={`pb-3 px-4 space-y-0.5 ${isRTL ? 'text-right' : 'text-left'}`}
+          aria-live="polite"
+        >
+          {rowErrors!.map((err, idx) => (
+            <li
+              key={`${err.code}-${idx}`}
+              className={`text-destructive flex items-start gap-1.5 ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
+              style={{ fontSize: '11px' }}
+            >
+              <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>
+                <span className="font-mono font-semibold mr-1.5">{err.code}</span>
+                {t(`autoReply.iem.${err.code}`)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -2351,6 +2371,86 @@ function Separator() {
     >
       /
     </span>
+  );
+}
+
+// ── THEN Section — answer mapping for an IF rule ──────────────────────────────
+
+interface ThenSectionProps {
+  condition: Condition;
+  answers: AutoReplyAnswer[];
+  isRTL: boolean;
+  isReadOnly: boolean;
+  onChange: (answerId: string) => void;
+  t: (key: string) => string;
+}
+
+/**
+ * THEN renders below the IF row inside the same rule card. The admin maps
+ * the matching IF to one of the predefined answers — that answer is what
+ * the auto-reply system returns when this rule wins at runtime.
+ */
+function ThenSection({
+  condition,
+  answers,
+  isRTL,
+  isReadOnly,
+  onChange,
+  t,
+}: ThenSectionProps) {
+  const selected = answers.find((a) => a.id === condition.answerId);
+  return (
+    <div
+      className={`border-t border-border/60 bg-muted/20 px-4 py-3 rounded-b-2xl flex flex-col gap-2 ${isRTL ? 'text-right items-end' : 'text-left items-start'}`}
+    >
+      <span
+        className="inline-flex items-center gap-1.5 text-primary font-mono uppercase"
+        style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.1em' }}
+      >
+        <span
+          className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/15"
+          aria-hidden="true"
+        >
+          ➜
+        </span>
+        {t('autoReply.editor.then')}
+      </span>
+
+      <div className="relative w-full">
+        <select
+          value={condition.answerId ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={isReadOnly || answers.length === 0}
+          aria-label={t('autoReply.editor.thenSelectAria')}
+          className={`w-full h-10 bg-white border border-border rounded-lg pr-9 pl-3 text-foreground appearance-none transition-all focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-muted/40 disabled:cursor-not-allowed ${
+            condition.answerId ? '' : 'text-muted-foreground'
+          } ${isRTL ? 'text-right pl-3 pr-9' : 'text-left pl-3 pr-9'}`}
+          style={{ fontSize: 'var(--text-sm)' }}
+        >
+          <option value="" disabled>
+            {answers.length === 0
+              ? t('autoReply.editor.thenNoAnswers')
+              : t('autoReply.editor.thenPlaceholder')}
+          </option>
+          {answers.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.text}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none ${isRTL ? 'left-3' : 'right-3'}`}
+        />
+        {selected && (
+          <span
+            className="inline-flex items-center px-2 h-5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-mono tabular-nums mt-1.5"
+            style={{ fontSize: '10px', fontWeight: 600 }}
+          >
+            {selected.weight}%
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
