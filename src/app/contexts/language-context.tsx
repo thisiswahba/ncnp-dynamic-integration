@@ -567,9 +567,11 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.statusActive': 'مفعّل',
       'autoReply.statusInactive': 'موقوف',
       'autoReply.statusToggleHint': 'تفعيل أو إيقاف الاستعلام',
-      'autoReply.testInputs.label': 'إدخالات الاختبار',
-      'autoReply.testInputs.subtitle': 'قيم إلزامية للمعاينة قبل التنفيذ',
+      'autoReply.testInputs.label': 'إدخال الاختبار',
+      'autoReply.testInputs.subtitle': 'معرّف المستخدم المطلوب قبل التنفيذ',
       'autoReply.testInputs.required': 'إلزامي',
+      'autoReply.testInputs.userIdLabel': 'معرّف المستخدم',
+      'autoReply.testInputs.userIdPlaceholder': 'أدخل معرّف المستخدم لتشغيل الاستعلام',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'تعليمات',
@@ -1142,9 +1144,11 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.statusActive': 'Active',
       'autoReply.statusInactive': 'Inactive',
       'autoReply.statusToggleHint': 'Activate or deactivate the query',
-      'autoReply.testInputs.label': 'Test Inputs',
-      'autoReply.testInputs.subtitle': 'Required values to preview the query',
+      'autoReply.testInputs.label': 'Test Input',
+      'autoReply.testInputs.subtitle': 'User ID required before execution',
       'autoReply.testInputs.required': 'Required',
+      'autoReply.testInputs.userIdLabel': 'User ID',
+      'autoReply.testInputs.userIdPlaceholder': 'Enter the User ID to run this query against',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'Instructions',

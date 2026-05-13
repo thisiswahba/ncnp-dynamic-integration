@@ -121,16 +121,13 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
   const location = useLocation();
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
-  const [activeItem, setActiveItem] = useState<string>('automated-queries');
+  const [activeItem, setActiveItem] = useState<string>('question-bank');
 
   // Keep the active highlight aligned with the current URL — so refreshes,
   // direct links, and back/forward navigation all light up the right item.
   useEffect(() => {
-    const path = location.pathname;
-    if (path.startsWith('/admin/queries')) {
-      setActiveItem('automated-queries');
-    } else if (path.startsWith('/admin/questions')) {
-      setActiveItem('automated-questions');
+    if (location.pathname.startsWith('/admin/questions')) {
+      setActiveItem('question-bank');
     }
   }, [location.pathname]);
 
@@ -153,25 +150,13 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
           <div className="flex flex-col size-full">
             <div className="flex flex-col gap-[4px] pb-[80px] px-[16px] pt-[32px] w-full">
 
-              {/* الاستعلامات الآلية — Automated Queries */}
-              <NavItem
-                icon={<Database className="w-4 h-4" />}
-                label={isRTL ? 'الاستعلامات الآلية' : 'Automated Queries'}
-                isActive={activeItem === 'automated-queries'}
-                onClick={() => {
-                  handleItemClick('automated-queries');
-                  navigate('/admin/queries');
-                }}
-                isRTL={isRTL}
-              />
-
-              {/* الأسئلة الآلية — Automated Questions */}
+              {/* بنك الأسئلة — Question Bank (sole nav surface) */}
               <NavItem
                 icon={<FileText className="w-4 h-4" />}
-                label={isRTL ? 'الأسئلة الآلية' : 'Automated Questions'}
-                isActive={activeItem === 'automated-questions'}
+                label={isRTL ? 'بنك الأسئلة' : 'Question Bank'}
+                isActive={activeItem === 'question-bank'}
                 onClick={() => {
-                  handleItemClick('automated-questions');
+                  handleItemClick('question-bank');
                   navigate('/admin/questions');
                 }}
                 isRTL={isRTL}

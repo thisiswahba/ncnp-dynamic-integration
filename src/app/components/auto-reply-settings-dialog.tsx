@@ -299,9 +299,9 @@ interface TestAuditEntry {
  * mirrors it to the console for visibility. Real wiring would POST this to
  * a server-side audit log.
  */
-function recordTestAuditEntry(questionId: string): void {
+function recordTestAuditEntry(userId: string, questionId: string): void {
   const entry: TestAuditEntry = {
-    user: 'admin@ncnp',
+    user: userId,
     event: 'Test Endpoint',
     time: new Date().toISOString(),
     questionId,
@@ -693,9 +693,10 @@ export function AutoReplySettingsDialog({
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('unvalidated');
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [executionError, setExecutionError] = useState<string | null>(null);
-  // Test inputs — the dynamic, required values the admin supplies per element
-  // before running the query. Keyed by `domain|source|element`.
-  const [testInputs, setTestInputs] = useState<Record<string, string>>({});
+  // Test input — the User ID under whose identity the query will be executed.
+  // Captured before running; participates in the audit trail (BR 1.9) and
+  // gates execution as the single mandatory test parameter (BR 1.8).
+  const [testUserId, setTestUserId] = useState<string>('');
   const inquiryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -736,7 +737,7 @@ export function AutoReplySettingsDialog({
       setValidationStatus('unvalidated');
       setValidationErrors([]);
       setExecutionError(null);
-      setTestInputs({});
+      setTestUserId('');
     }
   }, [open, question, preloaded]);
 
@@ -848,24 +849,15 @@ export function AutoReplySettingsDialog({
   );
 
   /**
-   * Validates the inline Test Inputs. Returns the list of `testInput`
-   * scoped errors — IEM 165 for missing, IEM 166 for type mismatch.
-   * Covers BR 1.8 (block on missing) and BR 1.4 (type validation).
+   * Validates the single mandatory User ID test input. Returns IEM 165 when
+   * empty (BR 1.8). Trimmed so whitespace-only input is rejected the same
+   * way as an empty field.
    */
   const validateTestInputs = (): ValidationError[] => {
-    const errs: ValidationError[] = [];
-    for (const def of runtimeInputDefs) {
-      const raw = testInputs[def.key];
-      if (raw === undefined || raw === '') {
-        errs.push({ code: 'IEM165', scope: 'testInput', inputKey: def.key });
-        continue;
-      }
-      const coerced = coerceForCompare(raw, def.type);
-      if (!coerced.ok) {
-        errs.push({ code: 'IEM166', scope: 'testInput', inputKey: def.key });
-      }
+    if (testUserId.trim().length === 0) {
+      return [{ code: 'IEM165', scope: 'testInput', inputKey: 'userId' }];
     }
-    return errs;
+    return [];
   };
 
   /**
@@ -904,9 +896,9 @@ export function AutoReplySettingsDialog({
     setValidationStatus('valid');
 
     // BR 1.9 — audit trail. Real wiring would POST this to the audit service.
-    recordTestAuditEntry(question?.id ?? 'unknown');
+    recordTestAuditEntry(testUserId.trim(), question?.id ?? 'unknown');
 
-    runExecution(testInputs);
+    runExecution({});
   };
 
   /**
@@ -1235,11 +1227,10 @@ export function AutoReplySettingsDialog({
                     )}
                   </div>
 
-                  {/* BR 1.1 / 1.2 / 1.8 — Test Inputs collected per element */}
-                  <TestInputsSection
-                    inputs={runtimeInputDefs}
-                    values={testInputs}
-                    onChange={setTestInputs}
+                  {/* BR 1.1 / 1.2 / 1.8 — Test User ID (single mandatory text input) */}
+                  <UserIdSection
+                    value={testUserId}
+                    onChange={setTestUserId}
                     errors={validationErrors}
                     isReadOnly={!!isReadOnly}
                     isRTL={isRTL}
@@ -2645,12 +2636,11 @@ function ValueInput({ condition, isRTL, isReadOnly, onChange, t }: ValueInputPro
   );
 }
 
-// ── Test Inputs Section (BR 1.x — Test Endpoints) ─────────────────────────────
+// ── User ID Section (BR 1.x — Test Endpoints) ─────────────────────────────────
 
-interface TestInputsSectionProps {
-  inputs: RuntimeInputDef[];
-  values: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+interface UserIdSectionProps {
+  value: string;
+  onChange: (next: string) => void;
   errors: ValidationError[];
   isReadOnly: boolean;
   isRTL: boolean;
@@ -2658,27 +2648,21 @@ interface TestInputsSectionProps {
 }
 
 /**
- * Renders one labeled, type-aware, mandatory input per distinct element
- * referenced by the IF rules. The admin must fill every input before the
- * Validate & Execute action can resolve to a result (BR 1.2 + BR 1.8).
+ * Single mandatory User ID text input. The admin identifies whose identity
+ * the query will be tested under; the value participates in the audit
+ * trail (BR 1.9) and gates execution via IEM 165 (BR 1.8).
  */
-function TestInputsSection({
-  inputs,
-  values,
+function UserIdSection({
+  value,
   onChange,
   errors,
   isReadOnly,
   isRTL,
   t,
-}: TestInputsSectionProps) {
-  if (inputs.length === 0) return null;
-
-  const errorFor = (key: string) =>
-    errors.find((e) => e.scope === 'testInput' && e.inputKey === key);
-
-  const update = (key: string, value: string) => {
-    onChange({ ...values, [key]: value });
-  };
+}: UserIdSectionProps) {
+  const err = errors.find(
+    (e) => e.scope === 'testInput' && e.inputKey === 'userId'
+  );
 
   return (
     <div className="mt-6">
@@ -2700,105 +2684,58 @@ function TestInputsSection({
         </span>
       </div>
 
-      <div className="rounded-xl border border-border/70 bg-white/70 divide-y divide-border/50">
-        {inputs.map((def) => {
-          const err = errorFor(def.key);
-          const value = values[def.key] ?? '';
-          const htmlType =
-            def.type === 'Number' ? 'number' : def.type === 'Date' ? 'date' : 'text';
+      <div
+        className={`rounded-xl border border-border/70 bg-white/70 p-3 ${isRTL ? 'text-right' : 'text-left'}`}
+      >
+        <div
+          className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+        >
+          <label
+            htmlFor="test-input-user-id"
+            className="text-foreground font-mono"
+            style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+          >
+            {t('autoReply.testInputs.userIdLabel')}
+          </label>
+          <span
+            className="text-destructive font-mono"
+            style={{ fontSize: '10px', fontWeight: 600 }}
+            aria-hidden="true"
+          >
+            {t('autoReply.testInputs.required')}
+          </span>
+        </div>
 
-          return (
-            <div
-              key={def.key}
-              className={`p-3 ${isRTL ? 'text-right' : 'text-left'}`}
-            >
-              <div
-                className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-              >
-                <label
-                  htmlFor={`test-input-${def.key}`}
-                  className="text-foreground font-mono"
-                  style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
-                >
-                  {def.element}
-                </label>
-                <span
-                  className="text-muted-foreground uppercase font-mono"
-                  style={{ fontSize: '10px', letterSpacing: '0.1em' }}
-                >
-                  {def.type}
-                </span>
-                <span
-                  className="text-destructive font-mono"
-                  style={{ fontSize: '10px', fontWeight: 600 }}
-                  aria-hidden="true"
-                >
-                  {t('autoReply.testInputs.required')}
-                </span>
-                <span
-                  className={`text-muted-foreground/70 truncate ${isRTL ? 'mr-auto' : 'ml-auto'}`}
-                  style={{ fontSize: '11px' }}
-                >
-                  {def.domain} · {def.source}
-                </span>
-              </div>
+        <input
+          id="test-input-user-id"
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t('autoReply.testInputs.userIdPlaceholder')}
+          readOnly={isReadOnly}
+          aria-invalid={!!err}
+          autoComplete="off"
+          className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 ${
+            err
+              ? 'border-destructive focus:border-destructive'
+              : 'border-border focus:border-primary/60'
+          } ${isRTL ? 'text-right' : 'text-left'}`}
+          style={{ fontSize: '14px' }}
+        />
 
-              {def.type === 'Boolean' ? (
-                <select
-                  id={`test-input-${def.key}`}
-                  value={value}
-                  onChange={(e) => update(def.key, e.target.value)}
-                  disabled={isReadOnly}
-                  aria-invalid={!!err}
-                  className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
-                    err
-                      ? 'border-destructive focus:border-destructive'
-                      : 'border-border focus:border-primary/60'
-                  } ${isRTL ? 'text-right' : 'text-left'}`}
-                  style={{ fontSize: '14px' }}
-                >
-                  <option value="" disabled>
-                    {t('autoReply.editor.pickValue')}
-                  </option>
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              ) : (
-                <input
-                  id={`test-input-${def.key}`}
-                  type={htmlType}
-                  value={value}
-                  onChange={(e) => update(def.key, e.target.value)}
-                  placeholder={t('autoReply.editor.enterValue')}
-                  readOnly={isReadOnly}
-                  aria-invalid={!!err}
-                  className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
-                    err
-                      ? 'border-destructive focus:border-destructive'
-                      : 'border-border focus:border-primary/60'
-                  } ${isRTL ? 'text-right' : 'text-left'}`}
-                  style={{ fontSize: '14px' }}
-                />
-              )}
-
-              {err && (
-                <p
-                  className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                  style={{ fontSize: '11px' }}
-                  aria-live="polite"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span>
-                    <span className="font-mono font-semibold mr-1.5">
-                      {err.code}
-                    </span>
-                    {t(`autoReply.iem.${err.code}`)}
-                  </span>
-                </p>
-              )}
-            </div>
-          );
-        })}
+        {err && (
+          <p
+            className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+            style={{ fontSize: '11px' }}
+            aria-live="polite"
+          >
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              <span className="font-mono font-semibold mr-1.5">{err.code}</span>
+              {t(`autoReply.iem.${err.code}`)}
+            </span>
+          </p>
+        )}
       </div>
     </div>
   );

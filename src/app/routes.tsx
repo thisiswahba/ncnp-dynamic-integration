@@ -29,7 +29,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to="/admin/queries" replace />
+        element: <Navigate to="/admin/questions" replace />
       },
       {
         path: 'admin',
@@ -37,7 +37,7 @@ export const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <Navigate to="/admin/queries" replace />
+            element: <Navigate to="/admin/questions" replace />
           },
           {
             path: 'data-sources',
