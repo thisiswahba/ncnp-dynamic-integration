@@ -1173,20 +1173,6 @@ export function AutoReplySettingsDialog({
                     )}
                   </div>
 
-                  {/* BR 1.1 / 1.2 / 1.8 — Test User ID. Only revealed after
-                      the query passes structural validation; until then the
-                      admin can't supply a value and can't save. */}
-                  {validationStatus === 'valid' && (
-                    <UserIdSection
-                      value={testUserId}
-                      onChange={setTestUserId}
-                      errors={validationErrors}
-                      isReadOnly={!!isReadOnly}
-                      isRTL={isRTL}
-                      t={t}
-                    />
-                  )}
-
                   {/* Expression-scoped validation errors (paren issues) */}
                   {validationErrors.some((e) => e.scope === 'expression') && (
                     <ul
@@ -1242,10 +1228,13 @@ export function AutoReplySettingsDialog({
                     </div>
                   )}
 
-                  {/* Inline "Query is valid" success banner — appears once
-                      Validate succeeds. Distinct from the validation IEM list
-                      above. Also surfaces benign non-success messages
-                      (e.g. no predefined answers) reusing the same component. */}
+                  {/*
+                    Success cluster — order matters per the latest design:
+                      1. "Query is Valid" banner sits directly under the canvas
+                      2. Query Preview field shows the readable form of the query
+                      3. Test Input (User ID *) is the last gate before Save
+                    The block is only mounted when structural validation passes.
+                  */}
                   {validationStatus === 'valid' && (
                     <div ref={inquiryRef} className="mt-4 space-y-4">
                       <QueryResultBanner
@@ -1255,8 +1244,17 @@ export function AutoReplySettingsDialog({
                         isRTL={isRTL}
                       />
                       <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
+                      <UserIdSection
+                        value={testUserId}
+                        onChange={setTestUserId}
+                        errors={validationErrors}
+                        isReadOnly={!!isReadOnly}
+                        isRTL={isRTL}
+                        t={t}
+                      />
                     </div>
                   )}
+
                   {inquiryResult && validationStatus !== 'valid' && (
                     <div ref={inquiryRef} className="mt-4">
                       <QueryResultBanner result={inquiryResult} t={t} isRTL={isRTL} />
