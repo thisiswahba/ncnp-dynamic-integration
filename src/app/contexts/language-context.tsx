@@ -504,6 +504,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.save': 'حفظ',
       'autoReply.editor.placeholder': 'استخدم "/" لإدراج عناصر المعادلة',
       'autoReply.editor.if': 'إذا',
+      'autoReply.editor.and': 'و',
+      'autoReply.editor.else': 'وإلا',
       'autoReply.editor.pickDomain': 'اختر المجال',
       'autoReply.editor.pickSource': 'اختر النظام',
       'autoReply.editor.pickElement': 'اختر العنصر',
@@ -576,6 +578,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.testInputs.required': 'إلزامي',
       'autoReply.testInputs.userIdLabel': 'معرّف المستخدم',
       'autoReply.testInputs.userIdPlaceholder': 'أدخل معرّف المستخدم لتشغيل الاستعلام',
+      'autoReply.testInputs.yearLabel': 'السنة',
+      'autoReply.testInputs.yearPlaceholder': 'مثال: 2025',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'تعليمات',
@@ -1085,6 +1089,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.save': 'Save',
       'autoReply.editor.placeholder': 'Use \u201C/\u201D to insert equation elements',
       'autoReply.editor.if': 'If',
+      'autoReply.editor.and': 'And',
+      'autoReply.editor.else': 'Else',
       'autoReply.editor.pickDomain': 'Pick work field',
       'autoReply.editor.pickSource': 'Pick system',
       'autoReply.editor.pickElement': 'Pick element',
@@ -1157,6 +1163,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.testInputs.required': 'Required',
       'autoReply.testInputs.userIdLabel': 'User ID',
       'autoReply.testInputs.userIdPlaceholder': 'Enter the User ID to run this query against',
+      'autoReply.testInputs.yearLabel': 'Year',
+      'autoReply.testInputs.yearPlaceholder': 'e.g. 2025',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'Instructions',

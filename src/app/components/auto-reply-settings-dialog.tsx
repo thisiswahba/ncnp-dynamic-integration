@@ -73,7 +73,22 @@ interface CatalogWorkField {
   systems: CatalogSystem[];
 }
 
-interface Condition {
+/**
+ * One IF clause — the same shape as the parent Condition minus the
+ * rule-level metadata (id, answerId, parens). Used by `andClauses` to
+ * inline AND-joined sub-conditions within the same rule.
+ */
+export interface ConditionClause {
+  domain?: string;
+  source?: string;
+  element?: string;
+  elementType?: ElementDataType;
+  operator?: string;
+  value?: string;
+  value2?: string;
+}
+
+export interface Condition {
   id: string;
   domain?: string;
   source?: string;
@@ -85,11 +100,23 @@ interface Condition {
   /** Upper bound for range operators (BETWEEN / NOT BETWEEN). */
   value2?: string;
   /**
+   * Additional clauses joined to the primary clause with AND. All clauses
+   * must match for the rule's IF to be considered true. Renders inline as
+   *   `<primary> AND <clause₁> AND <clause₂>…`
+   */
+  andClauses?: ConditionClause[];
+  /**
    * THEN — id of the predefined answer this rule resolves to when its IF
    * condition matches at runtime. Each If is an independent rule; the first
    * rule whose IF matches wins and its THEN answer is returned.
    */
   answerId?: string;
+  /**
+   * Marks the rule as the catch-all `ELSE` branch — it has no IF clauses
+   * and resolves to its `answerId` when no preceding rule matched. Only
+   * one else rule is meaningful and it should be the last rule.
+   */
+  isElse?: boolean;
   /**
    * Manual parentheses grouping. Renders `(` before the condition when
    * `openParen` is true and `)` after when `closeParen` is true. Operates
@@ -186,6 +213,7 @@ const catalog: CatalogWorkField[] = [
       {
         name: 'Tax Agency',
         elements: [
+          { name: 'balance', type: 'Number' },
           { name: 'total_revenue', type: 'Number' },
           { name: 'last_filing_date', type: 'Date' },
           { name: 'tax_status', type: 'String' },
@@ -206,6 +234,7 @@ const catalog: CatalogWorkField[] = [
       {
         name: 'NCNP Registry',
         elements: [
+          { name: 'area', type: 'String' },
           { name: 'beneficiaries_count', type: 'Number' },
           { name: 'services_count', type: 'Number' },
           { name: 'sector', type: 'String' },
@@ -274,20 +303,34 @@ function isRangeOperator(operator?: string): boolean {
   return operator === 'BETWEEN' || operator === 'NOT BETWEEN';
 }
 
-function isConditionComplete(c: Condition): boolean {
+/**
+ * True when one clause (primary or AND'd) has all the picker fields it
+ * needs to evaluate at runtime. The clause shape mirrors a `Condition` but
+ * without rule-level fields.
+ */
+function isClauseComplete(c: ConditionClause): boolean {
   if (!c.domain || !c.source || !c.element || !c.operator) return false;
-  // THEN answer is also part of completeness — a rule without an outcome
-  // can't resolve to anything at runtime.
-  if (!c.answerId) return false;
   if (!valueRequiresInput(c.operator)) return true;
   if (isRangeOperator(c.operator)) return !!c.value && !!c.value2;
   return !!c.value;
+}
+
+function isConditionComplete(c: Condition): boolean {
+  // THEN answer is part of completeness for every rule — a rule without an
+  // outcome can't resolve to anything at runtime.
+  if (!c.answerId) return false;
+  // The catch-all ELSE rule has no IF clauses; the answerId alone is enough.
+  if (c.isElse) return true;
+  if (!isClauseComplete(c)) return false;
+  return (c.andClauses ?? []).every(isClauseComplete);
 }
 
 // ── Audit Trail (BR 1.9 — Test Endpoints) ─────────────────────────────────────
 
 interface TestAuditEntry {
   user: string;
+  /** Year supplied as a test input alongside the user identity. */
+  year: string;
   event: 'Test Endpoint';
   time: string;
   questionId: string;
@@ -299,9 +342,13 @@ interface TestAuditEntry {
  * mirrors it to the console for visibility. Real wiring would POST this to
  * a server-side audit log.
  */
-function recordTestAuditEntry(userId: string, questionId: string): void {
+function recordTestAuditEntry(
+  inputs: { userId: string; year: string },
+  questionId: string
+): void {
   const entry: TestAuditEntry = {
-    user: userId,
+    user: inputs.userId,
+    year: inputs.year,
     event: 'Test Endpoint',
     time: new Date().toISOString(),
     questionId,
@@ -692,10 +739,10 @@ export function AutoReplySettingsDialog({
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('unvalidated');
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [executionError, setExecutionError] = useState<string | null>(null);
-  // Test input — the User ID under whose identity the query will be executed.
-  // Captured before running; participates in the audit trail (BR 1.9) and
-  // gates execution as the single mandatory test parameter (BR 1.8).
+  // Test inputs — User ID + Year. Both are mandatory parameters (BR 1.8),
+  // are captured in the audit trail (BR 1.9), and gate Save until filled.
   const [testUserId, setTestUserId] = useState<string>('');
+  const [testYear, setTestYear] = useState<string>('');
   const inquiryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -736,6 +783,7 @@ export function AutoReplySettingsDialog({
       setValidationErrors([]);
       setExecutionError(null);
       setTestUserId('');
+      setTestYear('');
     }
   }, [open, question, preloaded]);
 
@@ -847,15 +895,18 @@ export function AutoReplySettingsDialog({
   );
 
   /**
-   * Validates the single mandatory User ID test input. Returns IEM 165 when
-   * empty (BR 1.8). Trimmed so whitespace-only input is rejected the same
-   * way as an empty field.
+   * Validates the mandatory test inputs — User ID and Year. Each empty
+   * (or whitespace-only) field surfaces its own IEM 165 inline (BR 1.8).
    */
   const validateTestInputs = (): ValidationError[] => {
+    const errors: ValidationError[] = [];
     if (testUserId.trim().length === 0) {
-      return [{ code: 'IEM165', scope: 'testInput', inputKey: 'userId' }];
+      errors.push({ code: 'IEM165', scope: 'testInput', inputKey: 'userId' });
     }
-    return [];
+    if (testYear.trim().length === 0) {
+      errors.push({ code: 'IEM165', scope: 'testInput', inputKey: 'year' });
+    }
+    return errors;
   };
 
   /**
@@ -924,7 +975,10 @@ export function AutoReplySettingsDialog({
     setValidationErrors([]);
 
     // BR 1.9 — record the audit trail entry, then hand off to the host.
-    recordTestAuditEntry(testUserId.trim(), question.id);
+    recordTestAuditEntry(
+      { userId: testUserId.trim(), year: testYear.trim() },
+      question.id
+    );
     onSave?.(expression, '');
     onOpenChange(false);
   };
@@ -1244,9 +1298,11 @@ export function AutoReplySettingsDialog({
                         isRTL={isRTL}
                       />
                       <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
-                      <UserIdSection
-                        value={testUserId}
-                        onChange={setTestUserId}
+                      <TestInputsSection
+                        userId={testUserId}
+                        year={testYear}
+                        onChangeUserId={setTestUserId}
+                        onChangeYear={setTestYear}
                         errors={validationErrors}
                         isReadOnly={!!isReadOnly}
                         isRTL={isRTL}
@@ -1300,7 +1356,9 @@ export function AutoReplySettingsDialog({
                   onClick={handleSave}
                   disabled={
                     isAutomationActive &&
-                    (validationStatus !== 'valid' || testUserId.trim().length === 0)
+                    (validationStatus !== 'valid' ||
+                      testUserId.trim().length === 0 ||
+                      testYear.trim().length === 0)
                   }
                   className="h-9 px-5 font-medium"
                   style={{ fontSize: 'var(--text-sm)' }}
@@ -2047,6 +2105,61 @@ function Connector({
   );
 }
 
+// ── Condition Clause Row (read-only AND sub-clause inside a rule card) ───────
+
+interface ConditionClauseRowProps {
+  clause: ConditionClause;
+  isRTL: boolean;
+  t: (key: string) => string;
+}
+
+/**
+ * Renders one AND-joined sub-clause beneath the primary clause inside a
+ * rule card. Visual parity with the primary pills row but read-only —
+ * the picker isn't extended to edit clauses in this iteration. Layout:
+ *   `AND  <domain>  /  <source>  /  <element>  <op>  <value>`
+ */
+function ConditionClauseRow({ clause, isRTL, t }: ConditionClauseRowProps) {
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+    >
+      <span
+        className="uppercase font-mono font-semibold text-muted-foreground px-2 py-0.5 rounded bg-muted/60"
+        style={{ fontSize: '10px', letterSpacing: '0.15em' }}
+      >
+        {t('autoReply.editor.and')}
+      </span>
+      <Pill label={clause.domain ?? ''} placeholder="—" isSet onClick={() => {}} />
+      <Separator />
+      <Pill label={clause.source ?? ''} placeholder="—" isSet onClick={() => {}} />
+      <Separator />
+      <Pill label={clause.element ?? ''} placeholder="—" isSet onClick={() => {}} />
+      {clause.operator && (
+        <Pill
+          label={clause.operator}
+          placeholder="—"
+          isSet
+          variant="operator"
+          onClick={() => {}}
+        />
+      )}
+      {valueRequiresInput(clause.operator) && clause.value && (
+        <Pill
+          label={
+            isRangeOperator(clause.operator) && clause.value2
+              ? `${clause.value} – ${clause.value2}`
+              : clause.value
+          }
+          placeholder="—"
+          isSet
+          onClick={() => {}}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── Condition Block ───────────────────────────────────────────────────────────
 
 interface ConditionBlockProps extends ExpressionEditorProps {
@@ -2084,9 +2197,10 @@ function ConditionBlock({
   };
 
   const hasError = !!rowErrors && rowErrors.length > 0;
+  const isElseRule = !!condition.isElse;
   return (
-    // Self-contained IF rule card. No AND/OR connectors between rules —
-    // each card is independent and carries its own THEN answer mapping.
+    // Self-contained IF (or catch-all ELSE) rule card. No connectors between
+    // rules — each card is independent and carries its own THEN answer.
     <div
       className={`group relative rounded-2xl bg-white/80 ring-1 ring-inset transition-colors ${
         hasError
@@ -2095,7 +2209,7 @@ function ConditionBlock({
       }`}
       aria-invalid={hasError || undefined}
     >
-      {/* IF header strip */}
+      {/* IF / ELSE header strip */}
       <div
         className={`flex items-center justify-between px-4 pt-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
       >
@@ -2107,9 +2221,9 @@ function ConditionBlock({
             className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/15"
             aria-hidden="true"
           >
-            ?
+            {isElseRule ? '↳' : '?'}
           </span>
-          {t('autoReply.editor.if')}
+          {isElseRule ? t('autoReply.editor.else') : t('autoReply.editor.if')}
         </span>
         {!isReadOnly && (
           <button
@@ -2123,7 +2237,8 @@ function ConditionBlock({
         )}
       </div>
 
-      {/* IF body — pills row */}
+      {/* IF body — pills row. Suppressed entirely for ELSE rules. */}
+      {!isElseRule && (
       <div
         className={`flex flex-wrap items-center gap-1.5 px-4 pb-3 pt-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
       >
@@ -2308,6 +2423,27 @@ function ConditionBlock({
         </span>
       )}
       </div>
+      )}
+
+      {/* Inline AND-joined sub-clauses — rendered read-only beneath the
+          primary pills row. Each clause renders the same picker labels
+          ({domain · source · element · operator · value}) prefixed with
+          an `AND` chip. Editing/adding clauses inside the dialog is out of
+          scope for this iteration — clauses arrive via preloaded data. */}
+      {!isElseRule && condition.andClauses && condition.andClauses.length > 0 && (
+        <div
+          className={`flex flex-col gap-1.5 px-4 pb-3 -mt-1 ${isRTL ? 'items-end' : 'items-start'}`}
+        >
+          {condition.andClauses.map((clause, idx) => (
+            <ConditionClauseRow
+              key={idx}
+              clause={clause}
+              isRTL={isRTL}
+              t={t}
+            />
+          ))}
+        </div>
+      )}
 
       {/* THEN section — answer the rule resolves to when its IF matches */}
       <ThenSection
@@ -2524,11 +2660,13 @@ function ValueInput({ condition, isRTL, isReadOnly, onChange, t }: ValueInputPro
   );
 }
 
-// ── User ID Section (BR 1.x — Test Endpoints) ─────────────────────────────────
+// ── Test Inputs Section (BR 1.x — Test Endpoints) ─────────────────────────────
 
-interface UserIdSectionProps {
-  value: string;
-  onChange: (next: string) => void;
+interface TestInputsSectionProps {
+  userId: string;
+  year: string;
+  onChangeUserId: (next: string) => void;
+  onChangeYear: (next: string) => void;
   errors: ValidationError[];
   isReadOnly: boolean;
   isRTL: boolean;
@@ -2536,20 +2674,27 @@ interface UserIdSectionProps {
 }
 
 /**
- * Single mandatory User ID text input. The admin identifies whose identity
- * the query will be tested under; the value participates in the audit
- * trail (BR 1.9) and gates execution via IEM 165 (BR 1.8).
+ * Two mandatory test inputs supplied before Save:
+ *   - User ID — the identity the query is tested under
+ *   - Year — the temporal scope for the query
+ * Each empty field surfaces its own IEM 165 inline (BR 1.8); both
+ * values are written to the audit trail (BR 1.9).
  */
-function UserIdSection({
-  value,
-  onChange,
+function TestInputsSection({
+  userId,
+  year,
+  onChangeUserId,
+  onChangeYear,
   errors,
   isReadOnly,
   isRTL,
   t,
-}: UserIdSectionProps) {
-  const err = errors.find(
+}: TestInputsSectionProps) {
+  const errUser = errors.find(
     (e) => e.scope === 'testInput' && e.inputKey === 'userId'
+  );
+  const errYear = errors.find(
+    (e) => e.scope === 'testInput' && e.inputKey === 'year'
   );
 
   return (
@@ -2572,58 +2717,117 @@ function UserIdSection({
       </div>
 
       <div
-        className={`rounded-xl border border-border/70 bg-white/70 p-3 ${isRTL ? 'text-right' : 'text-left'}`}
+        className={`rounded-xl border border-border/70 bg-white/70 p-3 grid grid-cols-1 md:grid-cols-2 gap-3 ${isRTL ? 'text-right' : 'text-left'}`}
       >
-        <div
-          className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-        >
-          <label
-            htmlFor="test-input-user-id"
-            className="text-foreground font-mono"
-            style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
-          >
-            {t('autoReply.testInputs.userIdLabel')}
-          </label>
-          <span
-            className="text-destructive font-mono"
-            style={{ fontSize: '10px', fontWeight: 600 }}
-            aria-hidden="true"
-          >
-            {t('autoReply.testInputs.required')}
-          </span>
-        </div>
-
-        <input
+        <TestInputField
           id="test-input-user-id"
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          label={t('autoReply.testInputs.userIdLabel')}
+          requiredLabel={t('autoReply.testInputs.required')}
           placeholder={t('autoReply.testInputs.userIdPlaceholder')}
+          value={userId}
+          onChange={onChangeUserId}
+          error={errUser}
           readOnly={isReadOnly}
-          aria-invalid={!!err}
-          autoComplete="off"
-          className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 ${
-            err
-              ? 'border-destructive focus:border-destructive'
-              : 'border-border focus:border-primary/60'
-          } ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: '14px' }}
+          isRTL={isRTL}
+          t={t}
         />
-
-        {err && (
-          <p
-            className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-            style={{ fontSize: '11px' }}
-            aria-live="polite"
-          >
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            <span>
-              <span className="font-mono font-semibold mr-1.5">{err.code}</span>
-              {t(`autoReply.iem.${err.code}`)}
-            </span>
-          </p>
-        )}
+        <TestInputField
+          id="test-input-year"
+          label={t('autoReply.testInputs.yearLabel')}
+          requiredLabel={t('autoReply.testInputs.required')}
+          placeholder={t('autoReply.testInputs.yearPlaceholder')}
+          value={year}
+          onChange={onChangeYear}
+          error={errYear}
+          readOnly={isReadOnly}
+          inputMode="numeric"
+          isRTL={isRTL}
+          t={t}
+        />
       </div>
+    </div>
+  );
+}
+
+interface TestInputFieldProps {
+  id: string;
+  label: string;
+  requiredLabel: string;
+  placeholder: string;
+  value: string;
+  onChange: (next: string) => void;
+  error?: ValidationError;
+  readOnly?: boolean;
+  inputMode?: 'numeric' | 'text';
+  isRTL: boolean;
+  t: (key: string) => string;
+}
+
+function TestInputField({
+  id,
+  label,
+  requiredLabel,
+  placeholder,
+  value,
+  onChange,
+  error,
+  readOnly,
+  inputMode,
+  isRTL,
+  t,
+}: TestInputFieldProps) {
+  return (
+    <div>
+      <div
+        className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      >
+        <label
+          htmlFor={id}
+          className="text-foreground font-mono"
+          style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+        >
+          {label}
+        </label>
+        <span
+          className="text-destructive font-mono"
+          style={{ fontSize: '10px', fontWeight: 600 }}
+          aria-hidden="true"
+        >
+          {requiredLabel}
+        </span>
+      </div>
+
+      <input
+        id={id}
+        type="text"
+        inputMode={inputMode}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        aria-invalid={!!error}
+        autoComplete="off"
+        className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 ${
+          error
+            ? 'border-destructive focus:border-destructive'
+            : 'border-border focus:border-primary/60'
+        } ${isRTL ? 'text-right' : 'text-left'}`}
+        style={{ fontSize: '14px' }}
+      />
+
+      {error && (
+        <p
+          className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+          style={{ fontSize: '11px' }}
+          aria-live="polite"
+        >
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            <span className="font-mono font-semibold mr-1.5">{error.code}</span>
+            {t(`autoReply.iem.${error.code}`)}
+          </span>
+        </p>
+      )}
     </div>
   );
 }

@@ -6,8 +6,10 @@ import { Checkbox } from '@/app/components/ui/checkbox';
 import { useLanguage } from '@/app/contexts/language-context';
 import {
   AutoReplySettingsDialog,
+  type AutoReplyAnswer,
   type AutoReplyContext,
   type AutoReplyQuestion,
+  type Condition,
   type PreloadedQuery,
 } from '@/app/components/auto-reply-settings-dialog';
 
@@ -39,78 +41,79 @@ const mockQueries: Query[] = [
 // The "question" variant exercises the nested Predefined Answers tree so the
 // auto-reply settings dialog renders the full Figma design (branching answers
 // with a sub-question + nested options).
+/**
+ * Predefined answers used by both demo queries. Same three options
+ * (Answer 1 / 2 / 3) so the demo rules can map deterministically:
+ *   - balance < 10000                 → Answer 1
+ *   - balance > 10000 AND area = sa   → Answer 2
+ *   - else                            → Answer 3
+ */
+const DEMO_ANSWERS: AutoReplyAnswer[] = [
+  { id: 'a1', text: 'Answer 1 — balance below threshold', weight: 60 },
+  { id: 'a2', text: 'Answer 2 — balance above threshold and area = SA', weight: 30 },
+  { id: 'a3', text: 'Answer 3 — fallback when no rule matches', weight: 10 },
+];
+
 function mockPreloadedForQuery(query: Query): { question: AutoReplyQuestion; preloaded: PreloadedQuery } {
-  const answerOptions =
-    query.linkedType === 'question'
+  // Both demo rows use the same predefined-answers vocabulary so the rules
+  // can refer to a1 / a2 / a3 consistently.
+  const conditions: Condition[] =
+    query.queryId === '#QRY-1002'
       ? [
+          // Rule 1: IF balance > 10000 AND area = 'sa' THEN Answer 2
           {
-            id: 'a1',
-            text: 'Yes, the meeting was held as scheduled.',
-            weight: 80,
+            id: 'c1',
+            domain: 'Financial Sector',
+            source: 'Tax Agency',
+            element: 'balance',
+            elementType: 'Number',
+            operator: '>',
+            value: '10000',
+            andClauses: [
+              {
+                domain: 'Operations Sector',
+                source: 'NCNP Registry',
+                element: 'area',
+                elementType: 'String',
+                operator: '=',
+                value: 'sa',
+              },
+            ],
+            answerId: 'a2',
           },
+          // Rule 2: ELSE THEN Answer 3
           {
-            id: 'a2',
-            text: 'No, the meeting was not held as scheduled.',
-            weight: 20,
-            subQuestion: {
-              id: 'sq-no',
-              title: 'Sub-question — reason the meeting did not take place',
-              answers: [
-                {
-                  id: 'a2-1',
-                  text: 'Postponed — rescheduled within 30 days',
-                  weight: 100,
-                },
-                {
-                  id: 'a2-2',
-                  text: 'Cancelled — quorum was not reached',
-                  weight: 100,
-                },
-                {
-                  id: 'a2-3',
-                  text: 'Other — see the supporting documentation',
-                  weight: 100,
-                  subQuestion: {
-                    id: 'sq-other',
-                    title: 'Sub-question — supporting documentation type',
-                    answers: [
-                      { id: 'a2-3-1', text: 'Board minutes', weight: 100 },
-                      { id: 'a2-3-2', text: 'Email correspondence', weight: 100 },
-                      { id: 'a2-3-3', text: 'External notice', weight: 100 },
-                    ],
-                  },
-                },
-              ],
-            },
+            id: 'c2',
+            isElse: true,
+            answerId: 'a3',
           },
         ]
       : [
-          { id: 'a1', text: 'High — entity flagged', weight: 100 },
-          { id: 'a2', text: 'Low — no match', weight: 0 },
+          // Default demo (#QRY-1001 and everything else):
+          // Rule 1: IF balance < 10000 THEN Answer 1
+          {
+            id: 'c1',
+            domain: 'Financial Sector',
+            source: 'Tax Agency',
+            element: 'balance',
+            elementType: 'Number',
+            operator: '<',
+            value: '10000',
+            answerId: 'a1',
+          },
         ];
+
   return {
     question: {
       id: query.linkedId,
       title: query.linkedItem,
       automated: query.status === 'activated',
-      answers: answerOptions,
+      answers: DEMO_ANSWERS,
     },
     preloaded: {
       isActive: query.status === 'activated',
       expression: {
-        conditions: [
-          {
-            id: 'c1',
-            domain: `${query.businessDomain} Sector`,
-            source: query.linkedType === 'question' ? 'Board Governance' : 'Tax Agency',
-            element: query.linkedType === 'question' ? 'meeting_held' : 'compliance_score',
-            elementType: query.linkedType === 'question' ? 'Boolean' : 'Number',
-            operator: query.linkedType === 'question' ? '=' : '>',
-            value: query.linkedType === 'question' ? 'true' : '80',
-            // THEN — preloaded rule resolves to the first predefined answer
-            answerId: 'a1',
-          },
-        ],
+        conditions,
         connectors: [],
       },
     },
