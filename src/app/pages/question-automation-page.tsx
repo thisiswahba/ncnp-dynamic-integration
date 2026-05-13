@@ -8,6 +8,7 @@ import { useLanguage } from '@/app/contexts/language-context';
 import {
   AutoReplySettingsDialog,
   type AutoReplyQuestion,
+  type AutoReplyAnswer,
 } from '@/app/components/auto-reply-settings-dialog';
 
 interface Question {
@@ -23,7 +24,7 @@ interface Question {
   queryId: string | null;
   fullTitle: string;
   subQuestions?: { id: string; title: string }[];
-  answers: { id: string; text: string; weight: number }[];
+  answers: AutoReplyAnswer[];
 }
 
 const mockQuestions: Question[] = [
@@ -43,9 +44,49 @@ const mockQuestions: Question[] = [
       { id: 's1', title: 'Were all required members in attendance?' },
       { id: 's2', title: 'Were the minutes of the meeting documented?' },
     ],
+    // Tree-shaped answers — sub-questions live as branches inside the No
+    // outcome, with one of those children itself branching one level deeper.
     answers: [
-      { id: 'a1', text: 'Yes, the meeting was held as scheduled.', weight: 100 },
-      { id: 'a2', text: 'No, the meeting was not held as scheduled.', weight: 20 },
+      {
+        id: 'a1',
+        text: 'Yes, the meeting was held as scheduled.',
+        weight: 80,
+      },
+      {
+        id: 'a2',
+        text: 'No, the meeting was not held as scheduled.',
+        weight: 20,
+        subQuestion: {
+          id: 'sq-no',
+          title: 'Sub-question — reason the meeting did not take place',
+          answers: [
+            {
+              id: 'a2-1',
+              text: 'Postponed — rescheduled within 30 days',
+              weight: 100,
+            },
+            {
+              id: 'a2-2',
+              text: 'Cancelled — quorum was not reached',
+              weight: 100,
+            },
+            {
+              id: 'a2-3',
+              text: 'Other — see the supporting documentation',
+              weight: 100,
+              subQuestion: {
+                id: 'sq-other',
+                title: 'Sub-question — supporting documentation type',
+                answers: [
+                  { id: 'a2-3-1', text: 'Board minutes', weight: 100 },
+                  { id: 'a2-3-2', text: 'Email correspondence', weight: 100 },
+                  { id: 'a2-3-3', text: 'External notice', weight: 100 },
+                ],
+              },
+            },
+          ],
+        },
+      },
     ],
   },
   {

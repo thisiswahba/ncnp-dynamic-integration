@@ -680,7 +680,6 @@ export function AutoReplySettingsDialog({
   }, [open, mode]);
   const isReadOnly = currentMode === 'view';
 
-  const [activeSubQuestionId, setActiveSubQuestionId] = useState<string>('main');
   const [isAutomationActive, setIsAutomationActive] = useState<boolean>(false);
   const [hasStartedBuilding, setHasStartedBuilding] = useState<boolean>(false);
   const [expression, setExpression] = useState<Expression>({
@@ -720,7 +719,6 @@ export function AutoReplySettingsDialog({
 
   useEffect(() => {
     if (open && question) {
-      setActiveSubQuestionId('main');
       if (preloaded) {
         setIsAutomationActive(preloaded.isActive);
         setExpression(preloaded.expression);
@@ -1059,48 +1057,15 @@ export function AutoReplySettingsDialog({
               </div>
             </div>
 
-            {/* Sub Question — tree-style card stack (replaces dropdown) */}
-            {question.subQuestions && question.subQuestions.length > 0 && (
-              <div>
-                <SectionEyebrow step="02" label={t('autoReply.subQuestion')} isRTL={isRTL} t={t} />
-                <div className="space-y-2.5">
-                  <SubQuestionCard
-                    id="main"
-                    title={t('autoReply.mainQuestion')}
-                    isPrimary
-                    isActive={activeSubQuestionId === 'main'}
-                    onSelect={() =>
-                      !isReadOnly && setActiveSubQuestionId('main')
-                    }
-                    disabled={isReadOnly}
-                    isRTL={isRTL}
-                  />
-                  {question.subQuestions.map((sq, idx) => (
-                    <SubQuestionCard
-                      key={sq.id}
-                      id={sq.id}
-                      title={sq.title}
-                      index={idx + 1}
-                      isActive={activeSubQuestionId === sq.id}
-                      onSelect={() =>
-                        !isReadOnly && setActiveSubQuestionId(sq.id)
-                      }
-                      disabled={isReadOnly}
-                      isRTL={isRTL}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Predefined Answers */}
+            {/* Predefined Answers (Step 02 — sub-questions appear inline as
+                branches inside each answer card, per the design) */}
             <div>
               {/* Header — rely on parent `dir` for visual order; no manual
                   flex-row-reverse hack so Arabic puts eyebrow on the right
                   and the toggle on the left automatically. */}
               <div className="flex items-end justify-between mb-3">
                 <SectionEyebrow
-                  step="03"
+                  step="02"
                   label={isRisk ? t('autoReply.predefinedScoresRange') : t('autoReply.predefinedAnswers')}
                   isRTL={isRTL}
                   noMargin
@@ -1150,7 +1115,7 @@ export function AutoReplySettingsDialog({
                 <div>
                   <div className="flex items-end justify-between mb-3 gap-3">
                     <SectionEyebrow
-                      step="04"
+                      step="03"
                       label={t('autoReply.autoQuerySettings')}
                       required
                       isRTL={isRTL}
@@ -1355,97 +1320,6 @@ export function AutoReplySettingsDialog({
         The component remains in the file for the real-integration path.
       */}
     </Sheet>
-  );
-}
-
-// ── Sub Question Card ─────────────────────────────────────────────────────────
-
-/**
- * Card-style entry in the Sub Question tree. Matches the answer-node visual
- * family (light grey rounded-xl) so the dialog reads as a single tree from
- * top to bottom. The active card lifts to a primary-tinted background so the
- * user always knows which question their predefined answers belong to.
- */
-interface SubQuestionCardProps {
-  id: string;
-  title: string;
-  /** "Main Question" gets a Sparkles eyebrow + bold title. */
-  isPrimary?: boolean;
-  /** 1-based index used as a leading marker for sub-question rows. */
-  index?: number;
-  isActive: boolean;
-  disabled?: boolean;
-  isRTL: boolean;
-  onSelect: () => void;
-}
-
-function SubQuestionCard({
-  id,
-  title,
-  isPrimary,
-  index,
-  isActive,
-  disabled,
-  isRTL,
-  onSelect,
-}: SubQuestionCardProps) {
-  const baseSurface = isActive
-    ? 'bg-primary/10 ring-1 ring-primary/40 ring-inset'
-    : 'bg-[#f9f9f9] ring-1 ring-border/40 ring-inset hover:bg-muted/60';
-  const cursor = disabled ? 'cursor-default' : 'cursor-pointer';
-
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={isActive}
-      data-question-id={id}
-      onClick={onSelect}
-      disabled={disabled}
-      className={`w-full rounded-xl px-4 py-3 transition-all duration-150 ${baseSurface} ${cursor} ${
-        isRTL ? 'text-right' : 'text-left'
-      } disabled:opacity-70`}
-    >
-      <div
-        className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-      >
-        {/* Leading marker — Sparkles for main, numeric chip for sub-rows */}
-        <span
-          className={`shrink-0 inline-flex items-center justify-center rounded-full font-mono tabular-nums ${
-            isPrimary
-              ? 'w-7 h-7 bg-primary text-primary-foreground'
-              : isActive
-                ? 'w-7 h-7 bg-primary/15 text-primary border border-primary/30'
-                : 'w-7 h-7 bg-white text-muted-foreground border border-border/60'
-          }`}
-          style={{ fontSize: '11px', fontWeight: 700 }}
-          aria-hidden="true"
-        >
-          {isPrimary ? <Sparkles className="w-3.5 h-3.5" /> : index}
-        </span>
-
-        {/* Title + meta */}
-        <div className={`flex-1 min-w-0 ${isRTL ? 'text-right' : 'text-left'}`}>
-          <p
-            className={`leading-snug truncate ${isActive ? 'text-primary' : 'text-foreground'}`}
-            style={{
-              fontSize: isPrimary ? '14px' : '14px',
-              fontWeight: isPrimary || isActive ? 600 : 500,
-            }}
-          >
-            {title}
-          </p>
-        </div>
-
-        {/* Trailing check when active */}
-        {isActive && (
-          <CheckCircle2
-            className="w-4 h-4 text-primary shrink-0"
-            aria-hidden="true"
-          />
-        )}
-      </div>
-    </button>
   );
 }
 
@@ -2674,7 +2548,7 @@ function UserIdSection({
     <div className="mt-6">
       <div className="flex items-end justify-between mb-3">
         <SectionEyebrow
-          step="05"
+          step="04"
           label={t('autoReply.testInputs.label')}
           required
           isRTL={isRTL}
