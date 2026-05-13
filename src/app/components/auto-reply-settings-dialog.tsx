@@ -859,24 +859,20 @@ export function AutoReplySettingsDialog({
   };
 
   /**
-   * BR 1.1 — Entry point for Validate & Execute.
+   * BR 1.1 — Entry point for Validate.
    *
-   * Sequence:
-   *   1. Run static validators (BR 1.2–1.5).
-   *   2. Validate Test Inputs against expected data types (BR 1.4 / 1.8).
-   *   3. Audit-trail the test event (BR 1.9).
-   *   4. Execute and surface the result inline (BR 1.3 / 3.2 / 3.3).
-   *   5. On execution failure show BNM 0 (BR 1.10 / 5.1 / 5.2).
+   * Runs ONLY structural validation (BR 1.2–1.5). The Test Input + audit
+   * trail belong to the Save step, so this just confirms that the rules
+   * are well-formed. On success the status flips to `valid`, the
+   * "Query is Valid" banner appears, and the Test Input section becomes
+   * visible so the admin can supply the User ID and save.
    */
   const handleValidateAndExecute = () => {
     setExecutionError(null);
 
     const structuralErrors = validateExpression(expression);
-    const inputErrors = validateTestInputs();
-    const allErrors = [...structuralErrors, ...inputErrors];
-
-    if (allErrors.length > 0) {
-      setValidationErrors(allErrors);
+    if (structuralErrors.length > 0) {
+      setValidationErrors(structuralErrors);
       setValidationStatus('invalid');
       setInquiryResult(null);
       return;
@@ -889,63 +885,47 @@ export function AutoReplySettingsDialog({
       return;
     }
 
-    // BR 3.1 — passed static + input validation.
+    // BR 3.1 — passed structural validation. Test Input + execution happen
+    // on Save; see `handleSave`.
     setValidationErrors([]);
     setValidationStatus('valid');
-
-    // BR 1.9 — audit trail. Real wiring would POST this to the audit service.
-    recordTestAuditEntry(testUserId.trim(), question?.id ?? 'unknown');
-
-    runExecution({});
+    setInquiryResult(null);
   };
+
 
   /**
-   * BR 1.3 / 3.2 / 3.3 / 5.1 / 5.2 — Walks the IF rules in order, evaluating
-   * each against the supplied test inputs. The first rule whose IF condition
-   * matches wins and its THEN answer is returned. Falls through to the first
-   * predefined answer when no rule explicitly matches (preview ergonomics).
-   *
-   * Real wiring will replace the in-process evaluation with the actual
-   * integration call; the try/catch preserves the BNM 0 path (BR 1.10 / 5.1).
+   * Save = the actual write. Gates on:
+   *   1. Validation status is `valid` (Validate was clicked + structure OK).
+   *   2. Test Input (User ID) is filled — surfaces as IEM 165 inline.
+   * On success: BR 1.9 audit trail entry, then `onSave` and close.
    */
-  const runExecution = (runtimeValues: Record<string, string>) => {
-    try {
-      const matchingRule = expression.conditions.find((c) => {
-        if (!isConditionComplete(c)) return false;
-        if (!c.element || !c.domain || !c.source) return false;
-        const key = `${c.domain}|${c.source}|${c.element}`;
-        const raw = runtimeValues[key];
-        return evaluateOneCondition(c, raw);
-      });
-
-      const fallbackRule = expression.conditions.find(isConditionComplete);
-      const winningRule = matchingRule ?? fallbackRule;
-      const resolved = winningRule?.answerId
-        ? displayedAnswers.find((a) => a.id === winningRule.answerId)
-        : displayedAnswers[0];
-
-      if (!resolved) {
-        setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
-        return;
-      }
-      setInquiryResult({ success: true, answer: resolved.text, elapsedMs: 248 });
-    } catch {
-      // BR 5.1 / 5.2 — execution failure. Drop status back from Valid since
-      // BR 5.2 says the query shall not be marked as successfully executed.
-      setExecutionError(t('autoReply.bnm.BNM0'));
-      setInquiryResult(null);
-      setValidationStatus('invalid');
-    }
-  };
-
-
   const handleSave = () => {
     if (!question) return;
-    if (isAutomationActive && !hasAnyComplete) {
+
+    // Auto-reply turned off — nothing query-related to validate; just save.
+    if (!isAutomationActive) {
+      onSave?.(expression, '');
+      onOpenChange(false);
+      return;
+    }
+
+    // Block until Validate has been clicked and the rules pass structure.
+    if (validationStatus !== 'valid') {
       setInquiryResult({ success: false, message: t('autoReply.save.needsQuery') });
       return;
     }
-    onSave?.(expression, inquiryResult?.answer ?? '');
+
+    // BR 1.8 — Test Input (User ID) must be supplied before saving.
+    const inputErrors = validateTestInputs();
+    if (inputErrors.length > 0) {
+      setValidationErrors(inputErrors);
+      return;
+    }
+    setValidationErrors([]);
+
+    // BR 1.9 — record the audit trail entry, then hand off to the host.
+    recordTestAuditEntry(testUserId.trim(), question.id);
+    onSave?.(expression, '');
     onOpenChange(false);
   };
 
@@ -1193,15 +1173,19 @@ export function AutoReplySettingsDialog({
                     )}
                   </div>
 
-                  {/* BR 1.1 / 1.2 / 1.8 — Test User ID (single mandatory text input) */}
-                  <UserIdSection
-                    value={testUserId}
-                    onChange={setTestUserId}
-                    errors={validationErrors}
-                    isReadOnly={!!isReadOnly}
-                    isRTL={isRTL}
-                    t={t}
-                  />
+                  {/* BR 1.1 / 1.2 / 1.8 — Test User ID. Only revealed after
+                      the query passes structural validation; until then the
+                      admin can't supply a value and can't save. */}
+                  {validationStatus === 'valid' && (
+                    <UserIdSection
+                      value={testUserId}
+                      onChange={setTestUserId}
+                      errors={validationErrors}
+                      isReadOnly={!!isReadOnly}
+                      isRTL={isRTL}
+                      t={t}
+                    />
+                  )}
 
                   {/* Expression-scoped validation errors (paren issues) */}
                   {validationErrors.some((e) => e.scope === 'expression') && (
@@ -1258,11 +1242,24 @@ export function AutoReplySettingsDialog({
                     </div>
                   )}
 
-                  {/* Query Result banner — inline (replaces popup), Figma 8:3354 */}
-                  {inquiryResult && (
+                  {/* Inline "Query is valid" success banner — appears once
+                      Validate succeeds. Distinct from the validation IEM list
+                      above. Also surfaces benign non-success messages
+                      (e.g. no predefined answers) reusing the same component. */}
+                  {validationStatus === 'valid' && (
                     <div ref={inquiryRef} className="mt-4 space-y-4">
-                      <QueryResultBanner result={inquiryResult} t={t} isRTL={isRTL} />
+                      <QueryResultBanner
+                        result={{ success: true, message: t('autoReply.queryValid.body') }}
+                        title={t('autoReply.queryValid.title')}
+                        t={t}
+                        isRTL={isRTL}
+                      />
                       <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
+                    </div>
+                  )}
+                  {inquiryResult && validationStatus !== 'valid' && (
+                    <div ref={inquiryRef} className="mt-4">
+                      <QueryResultBanner result={inquiryResult} t={t} isRTL={isRTL} />
                     </div>
                   )}
                 </div>
@@ -1303,8 +1300,17 @@ export function AutoReplySettingsDialog({
                 </Button>
                 <Button
                   onClick={handleSave}
+                  disabled={
+                    isAutomationActive &&
+                    (validationStatus !== 'valid' || testUserId.trim().length === 0)
+                  }
                   className="h-9 px-5 font-medium"
                   style={{ fontSize: 'var(--text-sm)' }}
+                  title={
+                    isAutomationActive && validationStatus !== 'valid'
+                      ? t('autoReply.save.needsQuery')
+                      : undefined
+                  }
                 >
                   {t('autoReply.save')}
                 </Button>
@@ -1778,14 +1784,18 @@ function EmptyEditor({
  */
 function QueryResultBanner({
   result,
+  title,
   t,
   isRTL,
 }: {
   result: InquiryResult;
+  /** Optional title override — defaults to the localized "Query Result" label. */
+  title?: string;
   t: (key: string) => string;
   isRTL: boolean;
 }) {
   const success = result.success;
+  const heading = title ?? t('autoReply.queryResult.title');
   return (
     <div
       role="status"
@@ -1801,13 +1811,13 @@ function QueryResultBanner({
           className={`${success ? 'text-primary' : 'text-rose-700'}`}
           style={{ fontSize: '15px', fontWeight: 700, lineHeight: 1.25 }}
         >
-          {t('autoReply.queryResult.title')}
+          {heading}
         </p>
         <p
           className="text-foreground mt-1"
           style={{ fontSize: 'var(--text-base)', fontWeight: 500, lineHeight: 1.45 }}
         >
-          {success ? result.answer : result.message}
+          {success ? (result.answer ?? result.message) : result.message}
         </p>
         {success && result.elapsedMs != null && (
           <p
