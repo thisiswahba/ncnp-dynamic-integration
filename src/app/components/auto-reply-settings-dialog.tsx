@@ -132,13 +132,29 @@ interface InquiryResult {
 
 export type ValidationStatus = 'unvalidated' | 'valid' | 'invalid';
 
-export type IemCode = 'IEM160' | 'IEM161' | 'IEM162' | 'IEM163' | 'IEM164';
+export type IemCode =
+  | 'IEM160'
+  | 'IEM161'
+  | 'IEM162'
+  | 'IEM163'
+  | 'IEM164'
+  // Test input parameter errors (BR 1.x — Test Endpoints)
+  | 'IEM165' // mandatory test input missing
+  | 'IEM166' // test input does not match expected data type
+  | 'IEM167' // endpoint unreachable / timeout
+  | 'IEM168' // endpoint authentication / authorization failed
+  | 'IEM169'; // unexpected response from endpoint
 
 export interface ValidationError {
   code: IemCode;
-  /** `condition` errors attach to a specific row; `expression` errors are global. */
-  scope: 'condition' | 'expression';
+  /**
+   * `condition` errors attach to a specific row, `expression` errors are
+   * global to the canvas, `testInput` errors attach to a specific test
+   * input field (keyed by `inputKey`).
+   */
+  scope: 'condition' | 'expression' | 'testInput';
   conditionId?: string;
+  inputKey?: string;
 }
 
 // ── Reference Catalog ─────────────────────────────────────────────────────────
@@ -266,6 +282,43 @@ function isConditionComplete(c: Condition): boolean {
   if (!valueRequiresInput(c.operator)) return true;
   if (isRangeOperator(c.operator)) return !!c.value && !!c.value2;
   return !!c.value;
+}
+
+// ── Audit Trail (BR 1.9 — Test Endpoints) ─────────────────────────────────────
+
+interface TestAuditEntry {
+  user: string;
+  event: 'Test Endpoint';
+  time: string;
+  questionId: string;
+}
+
+/**
+ * BR 1.9 — record who clicked Test, what event, and when. Persists to
+ * sessionStorage so the entry survives modal-close within the session, and
+ * mirrors it to the console for visibility. Real wiring would POST this to
+ * a server-side audit log.
+ */
+function recordTestAuditEntry(questionId: string): void {
+  const entry: TestAuditEntry = {
+    user: 'admin@ncnp',
+    event: 'Test Endpoint',
+    time: new Date().toISOString(),
+    questionId,
+  };
+  try {
+    const raw = sessionStorage.getItem('autoReply.testAuditTrail');
+    const trail = raw ? (JSON.parse(raw) as TestAuditEntry[]) : [];
+    trail.push(entry);
+    sessionStorage.setItem(
+      'autoReply.testAuditTrail',
+      JSON.stringify(trail.slice(-50))
+    );
+  } catch {
+    // sessionStorage unavailable — fall through to console only
+  }
+  // eslint-disable-next-line no-console
+  console.info('[audit] Test Endpoint', entry);
 }
 
 // ── Static Validation (B09.U24) ───────────────────────────────────────────────
@@ -640,6 +693,9 @@ export function AutoReplySettingsDialog({
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('unvalidated');
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [executionError, setExecutionError] = useState<string | null>(null);
+  // Test inputs — the dynamic, required values the admin supplies per element
+  // before running the query. Keyed by `domain|source|element`.
+  const [testInputs, setTestInputs] = useState<Record<string, string>>({});
   const inquiryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -680,15 +736,18 @@ export function AutoReplySettingsDialog({
       setValidationStatus('unvalidated');
       setValidationErrors([]);
       setExecutionError(null);
+      setTestInputs({});
     }
   }, [open, question, preloaded]);
 
   // Any change to the expression invalidates prior validation results.
   // Status flips back to 'unvalidated' so the admin must re-run the gate.
+  // Test inputs reset too — the shape may have changed.
   const markUnvalidated = () => {
     setValidationStatus('unvalidated');
     setValidationErrors([]);
     setExecutionError(null);
+    setTestInputs({});
   };
 
   const displayedAnswers = question?.answers ?? [];
@@ -789,25 +848,45 @@ export function AutoReplySettingsDialog({
   );
 
   /**
-   * BR 1.1 — Entry point for [B09.U24] Validate & Execute Query.
+   * Validates the inline Test Inputs. Returns the list of `testInput`
+   * scoped errors — IEM 165 for missing, IEM 166 for type mismatch.
+   * Covers BR 1.8 (block on missing) and BR 1.4 (type validation).
+   */
+  const validateTestInputs = (): ValidationError[] => {
+    const errs: ValidationError[] = [];
+    for (const def of runtimeInputDefs) {
+      const raw = testInputs[def.key];
+      if (raw === undefined || raw === '') {
+        errs.push({ code: 'IEM165', scope: 'testInput', inputKey: def.key });
+        continue;
+      }
+      const coerced = coerceForCompare(raw, def.type);
+      if (!coerced.ok) {
+        errs.push({ code: 'IEM166', scope: 'testInput', inputKey: def.key });
+      }
+    }
+    return errs;
+  };
+
+  /**
+   * BR 1.1 — Entry point for Validate & Execute.
    *
    * Sequence:
-   *   1. Run static validators (BR 1.2–1.5). On any error, highlight the
-   *      offending conditions inline (BR 2.1), surface the IEM message
-   *      (BR 2.2), and short-circuit so the query is NOT marked Valid
-   *      (BR 2.3).
-   *   2. If there are no predefined answers wired up, refuse to validate.
-   *   3. Otherwise, execute immediately and show the result inline in the
-   *      Query Result banner below the builder. Per current design the
-   *      runtime input popup is NOT shown — preview resolves directly to
-   *      the first predefined answer that satisfies the rule structure.
+   *   1. Run static validators (BR 1.2–1.5).
+   *   2. Validate Test Inputs against expected data types (BR 1.4 / 1.8).
+   *   3. Audit-trail the test event (BR 1.9).
+   *   4. Execute and surface the result inline (BR 1.3 / 3.2 / 3.3).
+   *   5. On execution failure show BNM 0 (BR 1.10 / 5.1 / 5.2).
    */
   const handleValidateAndExecute = () => {
     setExecutionError(null);
 
-    const errors = validateExpression(expression);
-    if (errors.length > 0) {
-      setValidationErrors(errors);
+    const structuralErrors = validateExpression(expression);
+    const inputErrors = validateTestInputs();
+    const allErrors = [...structuralErrors, ...inputErrors];
+
+    if (allErrors.length > 0) {
+      setValidationErrors(allErrors);
       setValidationStatus('invalid');
       setInquiryResult(null);
       return;
@@ -820,29 +899,41 @@ export function AutoReplySettingsDialog({
       return;
     }
 
-    // BR 3.1 — passed static validation.
+    // BR 3.1 — passed static + input validation.
     setValidationErrors([]);
     setValidationStatus('valid');
 
-    // BR 3.2 — execute inline, no popup. The preview banner renders below.
-    runExecution({});
+    // BR 1.9 — audit trail. Real wiring would POST this to the audit service.
+    recordTestAuditEntry(question?.id ?? 'unknown');
+
+    runExecution(testInputs);
   };
 
   /**
-   * BR 3.2 / 3.3 / 5.1 / 5.2 — Performs the (mocked) execution. Walks the
-   * IF rules in order and resolves to the THEN answer of the first
-   * complete rule (preview mode). Real wiring will replace the body with a
-   * call to the consuming module. The try/catch preserves the BR 5.1 path
-   * (BNM 0 banner) for when a real failure does occur.
+   * BR 1.3 / 3.2 / 3.3 / 5.1 / 5.2 — Walks the IF rules in order, evaluating
+   * each against the supplied test inputs. The first rule whose IF condition
+   * matches wins and its THEN answer is returned. Falls through to the first
+   * predefined answer when no rule explicitly matches (preview ergonomics).
+   *
+   * Real wiring will replace the in-process evaluation with the actual
+   * integration call; the try/catch preserves the BNM 0 path (BR 1.10 / 5.1).
    */
-  const runExecution = (_runtimeValues: Record<string, string>) => {
+  const runExecution = (runtimeValues: Record<string, string>) => {
     try {
-      void _runtimeValues; // reserved for the live integration call
-      // First rule whose IF is complete wins; THEN gives us the answer id.
-      const firstRule = expression.conditions.find(isConditionComplete);
-      const resolved = firstRule?.answerId
-        ? displayedAnswers.find((a) => a.id === firstRule.answerId)
+      const matchingRule = expression.conditions.find((c) => {
+        if (!isConditionComplete(c)) return false;
+        if (!c.element || !c.domain || !c.source) return false;
+        const key = `${c.domain}|${c.source}|${c.element}`;
+        const raw = runtimeValues[key];
+        return evaluateOneCondition(c, raw);
+      });
+
+      const fallbackRule = expression.conditions.find(isConditionComplete);
+      const winningRule = matchingRule ?? fallbackRule;
+      const resolved = winningRule?.answerId
+        ? displayedAnswers.find((a) => a.id === winningRule.answerId)
         : displayedAnswers[0];
+
       if (!resolved) {
         setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
         return;
@@ -1143,6 +1234,17 @@ export function AutoReplySettingsDialog({
                       </div>
                     )}
                   </div>
+
+                  {/* BR 1.1 / 1.2 / 1.8 — Test Inputs collected per element */}
+                  <TestInputsSection
+                    inputs={runtimeInputDefs}
+                    values={testInputs}
+                    onChange={setTestInputs}
+                    errors={validationErrors}
+                    isReadOnly={!!isReadOnly}
+                    isRTL={isRTL}
+                    t={t}
+                  />
 
                   {/* Expression-scoped validation errors (paren issues) */}
                   {validationErrors.some((e) => e.scope === 'expression') && (
@@ -2540,6 +2642,165 @@ function ValueInput({ condition, isRTL, isReadOnly, onChange, t }: ValueInputPro
         style={{ fontSize: '13px' }}
       />
     </span>
+  );
+}
+
+// ── Test Inputs Section (BR 1.x — Test Endpoints) ─────────────────────────────
+
+interface TestInputsSectionProps {
+  inputs: RuntimeInputDef[];
+  values: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+  errors: ValidationError[];
+  isReadOnly: boolean;
+  isRTL: boolean;
+  t: (key: string) => string;
+}
+
+/**
+ * Renders one labeled, type-aware, mandatory input per distinct element
+ * referenced by the IF rules. The admin must fill every input before the
+ * Validate & Execute action can resolve to a result (BR 1.2 + BR 1.8).
+ */
+function TestInputsSection({
+  inputs,
+  values,
+  onChange,
+  errors,
+  isReadOnly,
+  isRTL,
+  t,
+}: TestInputsSectionProps) {
+  if (inputs.length === 0) return null;
+
+  const errorFor = (key: string) =>
+    errors.find((e) => e.scope === 'testInput' && e.inputKey === key);
+
+  const update = (key: string, value: string) => {
+    onChange({ ...values, [key]: value });
+  };
+
+  return (
+    <div className="mt-6">
+      <div
+        className={`flex items-end justify-between mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      >
+        <SectionEyebrow
+          step="05"
+          label={t('autoReply.testInputs.label')}
+          required
+          isRTL={isRTL}
+          noMargin
+        />
+        <span
+          className="text-muted-foreground"
+          style={{ fontSize: 'var(--text-xs)' }}
+        >
+          {t('autoReply.testInputs.subtitle')}
+        </span>
+      </div>
+
+      <div className="rounded-xl border border-border/70 bg-white/70 divide-y divide-border/50">
+        {inputs.map((def) => {
+          const err = errorFor(def.key);
+          const value = values[def.key] ?? '';
+          const htmlType =
+            def.type === 'Number' ? 'number' : def.type === 'Date' ? 'date' : 'text';
+
+          return (
+            <div
+              key={def.key}
+              className={`p-3 ${isRTL ? 'text-right' : 'text-left'}`}
+            >
+              <div
+                className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+              >
+                <label
+                  htmlFor={`test-input-${def.key}`}
+                  className="text-foreground font-mono"
+                  style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+                >
+                  {def.element}
+                </label>
+                <span
+                  className="text-muted-foreground uppercase font-mono"
+                  style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+                >
+                  {def.type}
+                </span>
+                <span
+                  className="text-destructive font-mono"
+                  style={{ fontSize: '10px', fontWeight: 600 }}
+                  aria-hidden="true"
+                >
+                  {t('autoReply.testInputs.required')}
+                </span>
+                <span
+                  className={`text-muted-foreground/70 truncate ${isRTL ? 'mr-auto' : 'ml-auto'}`}
+                  style={{ fontSize: '11px' }}
+                >
+                  {def.domain} · {def.source}
+                </span>
+              </div>
+
+              {def.type === 'Boolean' ? (
+                <select
+                  id={`test-input-${def.key}`}
+                  value={value}
+                  onChange={(e) => update(def.key, e.target.value)}
+                  disabled={isReadOnly}
+                  aria-invalid={!!err}
+                  className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
+                    err
+                      ? 'border-destructive focus:border-destructive'
+                      : 'border-border focus:border-primary/60'
+                  } ${isRTL ? 'text-right' : 'text-left'}`}
+                  style={{ fontSize: '14px' }}
+                >
+                  <option value="" disabled>
+                    {t('autoReply.editor.pickValue')}
+                  </option>
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              ) : (
+                <input
+                  id={`test-input-${def.key}`}
+                  type={htmlType}
+                  value={value}
+                  onChange={(e) => update(def.key, e.target.value)}
+                  placeholder={t('autoReply.editor.enterValue')}
+                  readOnly={isReadOnly}
+                  aria-invalid={!!err}
+                  className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
+                    err
+                      ? 'border-destructive focus:border-destructive'
+                      : 'border-border focus:border-primary/60'
+                  } ${isRTL ? 'text-right' : 'text-left'}`}
+                  style={{ fontSize: '14px' }}
+                />
+              )}
+
+              {err && (
+                <p
+                  className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                  style={{ fontSize: '11px' }}
+                  aria-live="polite"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    <span className="font-mono font-semibold mr-1.5">
+                      {err.code}
+                    </span>
+                    {t(`autoReply.iem.${err.code}`)}
+                  </span>
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

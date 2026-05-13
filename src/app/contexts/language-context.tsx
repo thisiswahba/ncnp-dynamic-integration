@@ -552,6 +552,11 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.iem.IEM162': 'عنصر البيانات غير متاح.',
       'autoReply.iem.IEM163': 'بناء الأقواس غير صحيح. يرجى مراجعة الجزء المحدد.',
       'autoReply.iem.IEM164': 'يوجد عدم تطابق في الأقواس. يرجى استكمال التعبير.',
+      'autoReply.iem.IEM165': 'هذا الحقل إلزامي. يرجى إدخال قيمة الاختبار.',
+      'autoReply.iem.IEM166': 'القيمة لا تطابق نوع البيانات المتوقع.',
+      'autoReply.iem.IEM167': 'تعذّر الوصول إلى الخدمة. يرجى المحاولة لاحقًا.',
+      'autoReply.iem.IEM168': 'فشل التحقق من صلاحية الوصول.',
+      'autoReply.iem.IEM169': 'استجابة غير متوقعة من الخدمة.',
       'autoReply.bnm.BNM0': 'حدث خطأ. يُرجى المحاولة مرة أخرى.',
       'autoReply.exec.failedHeader': 'فشل التنفيذ',
       'autoReply.queryResult.title': 'نتيجة الاستعلام',
@@ -562,6 +567,9 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.statusActive': 'مفعّل',
       'autoReply.statusInactive': 'موقوف',
       'autoReply.statusToggleHint': 'تفعيل أو إيقاف الاستعلام',
+      'autoReply.testInputs.label': 'إدخالات الاختبار',
+      'autoReply.testInputs.subtitle': 'قيم إلزامية للمعاينة قبل التنفيذ',
+      'autoReply.testInputs.required': 'إلزامي',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'تعليمات',
@@ -1119,6 +1127,11 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.iem.IEM162': 'Referenced metadata element is not available.',
       'autoReply.iem.IEM163': 'Invalid parentheses structure. Please review the highlighted expression.',
       'autoReply.iem.IEM164': 'Unbalanced parentheses detected. Please complete the expression.',
+      'autoReply.iem.IEM165': 'This test input is required. Please enter a value.',
+      'autoReply.iem.IEM166': 'Value does not match the expected data type.',
+      'autoReply.iem.IEM167': 'Endpoint unreachable. Please try again later.',
+      'autoReply.iem.IEM168': 'Authentication or authorization failed.',
+      'autoReply.iem.IEM169': 'Unexpected response from the endpoint.',
       'autoReply.bnm.BNM0': 'An error occurred. Please try again.',
       'autoReply.exec.failedHeader': 'Execution failed',
       'autoReply.queryResult.title': 'Query Result',
@@ -1129,6 +1142,9 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'autoReply.statusActive': 'Active',
       'autoReply.statusInactive': 'Inactive',
       'autoReply.statusToggleHint': 'Activate or deactivate the query',
+      'autoReply.testInputs.label': 'Test Inputs',
+      'autoReply.testInputs.subtitle': 'Required values to preview the query',
+      'autoReply.testInputs.required': 'Required',
 
       // Instructions popover — Query Builder guide
       'autoReply.instructions.button': 'Instructions',
