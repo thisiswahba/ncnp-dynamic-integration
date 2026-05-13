@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef, useRef } from 'react';
+import { useEffect, useMemo, useState, forwardRef, useRef } from 'react';
 import {
   Sheet,
   SheetContent,
@@ -20,6 +20,7 @@ import {
   Clock,
   Lock,
   Pencil,
+  Variable,
 } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/language-context';
 
@@ -30,11 +31,28 @@ interface SubQuestion {
   title: string;
 }
 
+export interface AutoReplyAnswer {
+  id: string;
+  text: string;
+  weight: number;
+  /**
+   * Optional nested sub-question that branches off this answer.
+   * Enables the tree structure for "Predefined Answers".
+   */
+  subQuestion?: AutoReplySubBranch;
+}
+
+export interface AutoReplySubBranch {
+  id: string;
+  title: string;
+  answers: AutoReplyAnswer[];
+}
+
 export interface AutoReplyQuestion {
   id: string;
   title: string;
   subQuestions?: SubQuestion[];
-  answers: { id: string; text: string; weight: number }[];
+  answers: AutoReplyAnswer[];
   automated?: boolean;
 }
 
@@ -62,8 +80,33 @@ interface Condition {
   element?: string;
   elementType?: ElementDataType;
   operator?: string;
+  /** Right-hand side literal (single value, or lower bound for range ops). */
   value?: string;
+  /** Upper bound for range operators (BETWEEN / NOT BETWEEN). */
+  value2?: string;
+  /**
+   * Manual parentheses grouping. Renders `(` before the condition when
+   * `openParen` is true and `)` after when `closeParen` is true. Operates
+   * purely on visual structure — `isConditionComplete` and inquiry logic
+   * are unaffected by paren state.
+   */
+  openParen?: boolean;
+  closeParen?: boolean;
 }
+
+export type OperatorCategory = 'comparison' | 'text' | 'nullEmpty' | 'range';
+
+export interface OperatorOption {
+  symbol: string;
+  category: OperatorCategory;
+}
+
+const OPERATOR_CATEGORY_ORDER: OperatorCategory[] = [
+  'comparison',
+  'text',
+  'range',
+  'nullEmpty',
+];
 
 interface Expression {
   conditions: Condition[];
@@ -77,6 +120,19 @@ interface InquiryResult {
   message?: string;
   answer?: string;
   elapsedMs?: number;
+}
+
+// ── Validation (BR 1.x / BR 2.x / BR 3.x) ─────────────────────────────────────
+
+export type ValidationStatus = 'unvalidated' | 'valid' | 'invalid';
+
+export type IemCode = 'IEM160' | 'IEM161' | 'IEM162' | 'IEM163' | 'IEM164';
+
+export interface ValidationError {
+  code: IemCode;
+  /** `condition` errors attach to a specific row; `expression` errors are global. */
+  scope: 'condition' | 'expression';
+  conditionId?: string;
 }
 
 // ── Reference Catalog ─────────────────────────────────────────────────────────
@@ -137,14 +193,54 @@ const catalog: CatalogWorkField[] = [
   },
 ];
 
-function operatorsForType(type?: ElementDataType): string[] {
+/**
+ * Returns the operators that are valid for a given Metadata element type,
+ * grouped by category. Drives Scenario 4 (Operator Compatibility) and
+ * Scenario 2 (Operator Categories) from [B09.U22].
+ */
+function operatorsForType(type?: ElementDataType): OperatorOption[] {
   if (!type) return [];
-  if (type === 'String')
-    return ['=', '\u2260', 'CONTAINS', 'STARTS WITH', 'ENDS WITH', 'IS NULL', 'IS NOT NULL'];
-  if (type === 'Number' || type === 'Date')
-    return ['=', '\u2260', '>', '<', '\u2265', '\u2264', 'BETWEEN', 'NOT BETWEEN'];
-  if (type === 'Boolean') return ['=', '\u2260'];
-  return ['=', '\u2260'];
+
+  const equality: OperatorOption[] = [
+    { symbol: '=', category: 'comparison' },
+    { symbol: '\u2260', category: 'comparison' },
+  ];
+  const standardNullEmpty: OperatorOption[] = [
+    { symbol: 'IS NULL', category: 'nullEmpty' },
+    { symbol: 'IS NOT NULL', category: 'nullEmpty' },
+  ];
+
+  if (type === 'String') {
+    return [
+      ...equality,
+      { symbol: 'CONTAINS', category: 'text' },
+      { symbol: 'NOT CONTAINS', category: 'text' },
+      { symbol: 'STARTS WITH', category: 'text' },
+      { symbol: 'ENDS WITH', category: 'text' },
+      ...standardNullEmpty,
+      { symbol: 'IS EMPTY', category: 'nullEmpty' },
+      { symbol: 'NOT EMPTY', category: 'nullEmpty' },
+    ];
+  }
+
+  if (type === 'Number' || type === 'Date') {
+    return [
+      ...equality,
+      { symbol: '>', category: 'comparison' },
+      { symbol: '<', category: 'comparison' },
+      { symbol: '\u2265', category: 'comparison' },
+      { symbol: '\u2264', category: 'comparison' },
+      { symbol: 'BETWEEN', category: 'range' },
+      { symbol: 'NOT BETWEEN', category: 'range' },
+      ...standardNullEmpty,
+    ];
+  }
+
+  if (type === 'Boolean') {
+    return [...equality, ...standardNullEmpty];
+  }
+
+  return equality;
 }
 
 function valueRequiresInput(operator?: string): boolean {
@@ -152,10 +248,263 @@ function valueRequiresInput(operator?: string): boolean {
   return !['IS NULL', 'IS NOT NULL', 'IS EMPTY', 'NOT EMPTY'].includes(operator);
 }
 
+function isRangeOperator(operator?: string): boolean {
+  return operator === 'BETWEEN' || operator === 'NOT BETWEEN';
+}
+
 function isConditionComplete(c: Condition): boolean {
   if (!c.domain || !c.source || !c.element || !c.operator) return false;
-  if (valueRequiresInput(c.operator) && !c.value) return false;
-  return true;
+  if (!valueRequiresInput(c.operator)) return true;
+  if (isRangeOperator(c.operator)) return !!c.value && !!c.value2;
+  return !!c.value;
+}
+
+// ── Static Validation (B09.U24) ───────────────────────────────────────────────
+
+/** BR 1.3 — operator must be in the set returned by `operatorsForType`. */
+function isOperatorCompatible(c: Condition): boolean {
+  if (!c.operator) return true; // Caught separately by completeness
+  const allowed = operatorsForType(c.elementType).map((o) => o.symbol);
+  return allowed.includes(c.operator);
+}
+
+/** BR 1.4 — referenced metadata element must exist within the chosen domain. */
+function isElementResolvable(c: Condition): boolean {
+  if (!c.domain || !c.source || !c.element) return true; // Caught by completeness
+  const domain = catalog.find((d) => d.name === c.domain);
+  if (!domain) return false;
+  const source = domain.systems.find((s) => s.name === c.source);
+  if (!source) return false;
+  return source.elements.some((e) => e.name === c.element);
+}
+
+/**
+ * BR 1.5 — parens must be both structurally well-formed (no close before open)
+ * and balanced (total opens = total closes).
+ */
+function inspectParens(expression: Expression): {
+  balanced: boolean;
+  structural: boolean;
+} {
+  let depth = 0;
+  let structural = true;
+  for (const c of expression.conditions) {
+    if (c.openParen) depth++;
+    if (c.closeParen) {
+      depth--;
+      if (depth < 0) {
+        structural = false;
+        // Reset so we don't keep cascading the error
+        depth = 0;
+      }
+    }
+  }
+  return { balanced: depth === 0, structural };
+}
+
+/**
+ * Runs every BR 1.x check on the expression and returns the list of
+ * issues found. An empty array means the query is valid.
+ */
+function validateExpression(expression: Expression): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const c of expression.conditions) {
+    // BR 1.2 — completeness / syntax
+    if (!isConditionComplete(c)) {
+      errors.push({ code: 'IEM160', scope: 'condition', conditionId: c.id });
+      // Skip the rest of this condition — further errors would be noisy.
+      continue;
+    }
+    // BR 1.4 — element resolvable inside chosen Business Domain
+    if (!isElementResolvable(c)) {
+      errors.push({ code: 'IEM162', scope: 'condition', conditionId: c.id });
+    }
+    // BR 1.3 — operator compatible with element data type
+    if (!isOperatorCompatible(c)) {
+      errors.push({ code: 'IEM161', scope: 'condition', conditionId: c.id });
+    }
+  }
+
+  // BR 1.5 — paren structure (open-before-close) and balance
+  const parens = inspectParens(expression);
+  if (!parens.structural) {
+    errors.push({ code: 'IEM163', scope: 'expression' });
+  } else if (!parens.balanced) {
+    errors.push({ code: 'IEM164', scope: 'expression' });
+  }
+
+  return errors;
+}
+
+// ── Runtime Inputs (BR 1.x / BR 2.x) ──────────────────────────────────────────
+
+/**
+ * Describes a single runtime input the admin must supply when previewing
+ * a query. Each unique element referenced by the expression becomes one
+ * entry — duplicates are collapsed so the dialog stays terse.
+ */
+interface RuntimeInputDef {
+  /** Stable key — `domain|source|element` — used as a record key. */
+  key: string;
+  /** Element name (e.g. `meeting_held`). */
+  element: string;
+  /** Element data type so the dialog renders the right control + validates. */
+  type: ElementDataType;
+  /** Lightweight breadcrumb for the label. */
+  domain: string;
+  source: string;
+}
+
+function collectRuntimeInputs(expression: Expression): RuntimeInputDef[] {
+  const seen = new Set<string>();
+  const out: RuntimeInputDef[] = [];
+  for (const c of expression.conditions) {
+    if (!c.element || !c.elementType || !c.domain || !c.source) continue;
+    const key = `${c.domain}|${c.source}|${c.element}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      element: c.element,
+      type: c.elementType,
+      domain: c.domain,
+      source: c.source,
+    });
+  }
+  return out;
+}
+
+function coerceForCompare(
+  raw: string | undefined,
+  type: ElementDataType
+): { ok: boolean; value: unknown } {
+  if (raw === undefined || raw === '') return { ok: true, value: undefined };
+  if (type === 'Number') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, value: raw };
+  }
+  if (type === 'Date') {
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? { ok: true, value: t } : { ok: false, value: raw };
+  }
+  if (type === 'Boolean') {
+    if (raw === 'true') return { ok: true, value: true };
+    if (raw === 'false') return { ok: true, value: false };
+    return { ok: false, value: raw };
+  }
+  return { ok: true, value: raw };
+}
+
+function evaluateOneCondition(
+  c: Condition,
+  runtimeRaw: string | undefined
+): boolean {
+  const type = c.elementType ?? 'String';
+  const { value: lhs } = coerceForCompare(runtimeRaw, type);
+  const { value: rhs } = coerceForCompare(c.value, type);
+  const { value: rhs2 } = coerceForCompare(c.value2, type);
+
+  switch (c.operator) {
+    case '=':
+      return lhs === rhs;
+    case '≠':
+      return lhs !== rhs;
+    case '>':
+      return (lhs as number) > (rhs as number);
+    case '<':
+      return (lhs as number) < (rhs as number);
+    case '≥':
+      return (lhs as number) >= (rhs as number);
+    case '≤':
+      return (lhs as number) <= (rhs as number);
+    case 'CONTAINS':
+      return String(lhs ?? '').includes(String(rhs ?? ''));
+    case 'NOT CONTAINS':
+      return !String(lhs ?? '').includes(String(rhs ?? ''));
+    case 'STARTS WITH':
+      return String(lhs ?? '').startsWith(String(rhs ?? ''));
+    case 'ENDS WITH':
+      return String(lhs ?? '').endsWith(String(rhs ?? ''));
+    case 'IS NULL':
+      return runtimeRaw === undefined || runtimeRaw === '' || runtimeRaw === null;
+    case 'IS NOT NULL':
+      return !(runtimeRaw === undefined || runtimeRaw === '' || runtimeRaw === null);
+    case 'IS EMPTY':
+      return runtimeRaw === '';
+    case 'NOT EMPTY':
+      return runtimeRaw !== '' && runtimeRaw !== undefined && runtimeRaw !== null;
+    case 'BETWEEN':
+      return (
+        lhs !== undefined && rhs !== undefined && rhs2 !== undefined &&
+        (lhs as number) >= (rhs as number) && (lhs as number) <= (rhs as number)
+      );
+    case 'NOT BETWEEN':
+      return (
+        lhs !== undefined && rhs !== undefined && rhs2 !== undefined &&
+        !((lhs as number) >= (rhs as number) && (lhs as number) <= (rhs as number))
+      );
+    default:
+      return false;
+  }
+}
+
+/**
+ * Walks `expression.conditions` left to right, evaluating each one against
+ * the runtime input values, then folds the results using the configured
+ * AND / OR connectors and the per-condition openParen / closeParen flags.
+ *
+ * Implementation note: we build a string of `true`/`false`/`&&`/`||`/`(`/`)`
+ * and run it through the JavaScript expression engine via `Function`.
+ * Inputs to that engine are always coerced booleans we just computed —
+ * no untrusted strings are interpolated.
+ */
+function evaluateExpression(
+  expression: Expression,
+  runtimeValues: Record<string, string>
+): boolean {
+  if (expression.conditions.length === 0) return false;
+
+  let openCount = 0;
+  let closeCount = 0;
+  const parts: string[] = [];
+
+  expression.conditions.forEach((c, i) => {
+    if (i > 0) {
+      const conn = expression.connectors[i - 1];
+      parts.push(conn === 'AND' ? '&&' : '||');
+    }
+    if (c.openParen) {
+      parts.push('(');
+      openCount++;
+    }
+    const key = `${c.domain}|${c.source}|${c.element}`;
+    const raw = runtimeValues[key];
+    parts.push(String(evaluateOneCondition(c, raw)));
+    if (c.closeParen) {
+      parts.push(')');
+      closeCount++;
+    }
+  });
+
+  // Defensively balance — if the admin opened/closed without the other side
+  // we silently pad to keep evaluation total. The UI surfaces structural
+  // problems separately; we never throw here.
+  while (closeCount < openCount) {
+    parts.push(')');
+    closeCount++;
+  }
+  while (openCount < closeCount) {
+    parts.unshift('(');
+    openCount++;
+  }
+
+  try {
+    // eslint-disable-next-line no-new-func
+    return Boolean(new Function(`return (${parts.join(' ')});`)());
+  } catch {
+    return false;
+  }
 }
 
 // ── Pill Component ────────────────────────────────────────────────────────────
@@ -240,6 +589,7 @@ interface AutoReplySettingsDialogProps {
   context?: AutoReplyContext;
   preloaded?: PreloadedQuery | null;
   onSave?: (expression: Expression, answer: string) => void;
+  /** Fired the first time the admin switches to Edit from the tab strip. */
   onRequestEdit?: () => void;
 }
 
@@ -259,8 +609,14 @@ export function AutoReplySettingsDialog({
 }: AutoReplySettingsDialogProps) {
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
-  const isReadOnly = mode === 'view';
   const isRisk = context === 'risk';
+  // Mode is internally controllable — the prop seeds the initial value but
+  // the user can flip between View / Edit via the header segmented control.
+  const [currentMode, setCurrentMode] = useState<AutoReplyMode>(mode);
+  useEffect(() => {
+    if (open) setCurrentMode(mode);
+  }, [open, mode]);
+  const isReadOnly = currentMode === 'view';
 
   const [activeSubQuestionId, setActiveSubQuestionId] = useState<string>('main');
   const [isAutomationActive, setIsAutomationActive] = useState<boolean>(false);
@@ -272,6 +628,9 @@ export function AutoReplySettingsDialog({
   const [openedPicker, setOpenedPicker] = useState<{ id: string; step: PickerStep } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [inquiryResult, setInquiryResult] = useState<InquiryResult | null>(null);
+  const [validationStatus, setValidationStatus] = useState<ValidationStatus>('unvalidated');
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const inquiryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -308,8 +667,20 @@ export function AutoReplySettingsDialog({
       setOpenedPicker(null);
       setSearchTerm('');
       setInquiryResult(null);
+      // Each open starts in the unvalidated state per BR 3 default.
+      setValidationStatus('unvalidated');
+      setValidationErrors([]);
+      setExecutionError(null);
     }
   }, [open, question, preloaded]);
+
+  // Any change to the expression invalidates prior validation results.
+  // Status flips back to 'unvalidated' so the admin must re-run the gate.
+  const markUnvalidated = () => {
+    setValidationStatus('unvalidated');
+    setValidationErrors([]);
+    setExecutionError(null);
+  };
 
   const displayedAnswers = question?.answers ?? [];
 
@@ -319,6 +690,7 @@ export function AutoReplySettingsDialog({
       conditions: prev.conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)),
     }));
     setInquiryResult(null);
+    markUnvalidated();
   };
 
   const removeCondition = (id: string) => {
@@ -336,6 +708,7 @@ export function AutoReplySettingsDialog({
       };
     });
     setInquiryResult(null);
+    markUnvalidated();
   };
 
   const addCondition = (connector: 'AND' | 'OR') => {
@@ -344,6 +717,7 @@ export function AutoReplySettingsDialog({
       connectors: [...prev.connectors, connector],
     }));
     setInquiryResult(null);
+    markUnvalidated();
   };
 
   const toggleConnector = (index: number) => {
@@ -352,6 +726,7 @@ export function AutoReplySettingsDialog({
       connectors: prev.connectors.map((c, i) => (i === index ? (c === 'AND' ? 'OR' : 'AND') : c)),
     }));
     setInquiryResult(null);
+    markUnvalidated();
   };
 
   const pickValue = (step: PickerStep, value: string, extras?: Partial<Condition>) => {
@@ -396,20 +771,80 @@ export function AutoReplySettingsDialog({
   };
 
   const hasAnyComplete = expression.conditions.some(isConditionComplete);
-  const allComplete = expression.conditions.every(isConditionComplete);
 
-  const checkInquiry = () => {
-    if (!allComplete) {
-      setInquiryResult({ success: false, message: t('autoReply.inquiry.incomplete') });
+  // Collect distinct (element + type) pairs the query references — these are
+  // the runtime inputs the admin needs to provide for a preview run.
+  const runtimeInputDefs = useMemo<RuntimeInputDef[]>(
+    () => collectRuntimeInputs(expression),
+    [expression]
+  );
+
+  /**
+   * BR 1.1 — Entry point for [B09.U24] Validate & Execute Query.
+   *
+   * Sequence:
+   *   1. Run static validators (BR 1.2–1.5). On any error, highlight the
+   *      offending conditions inline (BR 2.1), surface the IEM message
+   *      (BR 2.2), and short-circuit so the query is NOT marked Valid
+   *      (BR 2.3).
+   *   2. If there are no predefined answers wired up, refuse to validate.
+   *   3. Otherwise, execute immediately and show the result inline in the
+   *      Query Result banner below the builder. Per current design the
+   *      runtime input popup is NOT shown — preview resolves directly to
+   *      the first predefined answer that satisfies the rule structure.
+   */
+  const handleValidateAndExecute = () => {
+    setExecutionError(null);
+
+    const errors = validateExpression(expression);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setValidationStatus('invalid');
+      setInquiryResult(null);
       return;
     }
+
     if (!displayedAnswers.length) {
+      setValidationErrors([]);
+      setValidationStatus('invalid');
       setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
       return;
     }
-    const resolved = displayedAnswers[0];
-    setInquiryResult({ success: true, answer: resolved.text, elapsedMs: 248 });
+
+    // BR 3.1 — passed static validation.
+    setValidationErrors([]);
+    setValidationStatus('valid');
+
+    // BR 3.2 — execute inline, no popup. The preview banner renders below.
+    runExecution({});
   };
+
+  /**
+   * BR 3.2 / 3.3 / 5.1 / 5.2 — Performs the (mocked) execution. In the
+   * current preview mode there is no popup and no real integration call;
+   * a valid query resolves directly to the first predefined answer so the
+   * admin can confirm structure. Real wiring will replace the body with a
+   * call to the consuming module. The try/catch preserves the BR 5.1 path
+   * (BNM 0 banner) for when a real failure does occur.
+   */
+  const runExecution = (_runtimeValues: Record<string, string>) => {
+    try {
+      void _runtimeValues; // reserved for the live integration call
+      const resolved = displayedAnswers[0];
+      if (!resolved) {
+        setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
+        return;
+      }
+      setInquiryResult({ success: true, answer: resolved.text, elapsedMs: 248 });
+    } catch {
+      // BR 5.1 / 5.2 — execution failure. Drop status back from Valid since
+      // BR 5.2 says the query shall not be marked as successfully executed.
+      setExecutionError(t('autoReply.bnm.BNM0'));
+      setInquiryResult(null);
+      setValidationStatus('invalid');
+    }
+  };
+
 
   const handleSave = () => {
     if (!question) return;
@@ -436,8 +871,8 @@ export function AutoReplySettingsDialog({
         className="sm:max-w-[640px] w-full p-0 grid grid-rows-[auto_1fr_auto] gap-0"
         dir={isRTL ? 'rtl' : 'ltr'}
       >
-        {/* Header — eyebrow + title */}
-        <div className="px-6 pt-6 pb-5 border-b border-border/60">
+        {/* Header — eyebrow + title + View/Edit tab strip */}
+        <div className="px-6 pt-6 border-b border-border/60">
           <div className={`flex items-start justify-between gap-4 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
             <div className="flex-1 min-w-0">
               <p
@@ -455,38 +890,58 @@ export function AutoReplySettingsDialog({
                 }}
               >
                 {(() => {
-                  if (mode === 'view') {
+                  if (currentMode === 'view') {
                     return isRisk ? t('autoReply.titleViewRisk') : t('autoReply.titleView');
                   }
-                  if (mode === 'edit') {
+                  if (currentMode === 'edit') {
                     return isRisk ? t('autoReply.titleEditRisk') : t('autoReply.titleEdit');
                   }
                   return isRisk ? t('autoReply.titleRisk') : t('autoReply.title');
                 })()}
               </h2>
             </div>
-            {isReadOnly && (
-              <div className={`flex items-center gap-2 shrink-0 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-                <span
-                  className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-muted border border-border text-muted-foreground uppercase"
-                  style={{ fontSize: '10px', letterSpacing: '0.1em', fontWeight: 600 }}
+          </div>
+
+          {/* View / Edit mode tabs — sit on the header's bottom border so the
+              active underline visually merges with it. Larger touch target
+              than a segmented control, easier to scan. */}
+          <div
+            role="tablist"
+            aria-label={t('autoReply.modeAriaLabel')}
+            className={`flex items-center gap-1 mt-5 -mb-px ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
+          >
+            {(['view', 'edit'] as const).map((modeKey) => {
+              const selected = currentMode === modeKey;
+              const IconComp = modeKey === 'view' ? Lock : Pencil;
+              return (
+                <button
+                  key={modeKey}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => {
+                    setCurrentMode(modeKey);
+                    if (modeKey === 'edit') onRequestEdit?.();
+                  }}
+                  className={`group relative inline-flex items-center gap-2 h-11 px-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-t-md ${
+                    selected
+                      ? 'text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
                 >
-                  <Lock className="w-3 h-3" />
-                  {t('autoReply.readOnly')}
-                </span>
-                {onRequestEdit && (
-                  <button
-                    type="button"
-                    onClick={onRequestEdit}
-                    className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all active:scale-[0.97] ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                    style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    {t('autoReply.switchToEdit')}
-                  </button>
-                )}
-              </div>
-            )}
+                  <IconComp className="w-4 h-4" />
+                  {modeKey === 'view'
+                    ? t('autoReply.modeView')
+                    : t('autoReply.modeEdit')}
+                  <span
+                    className={`pointer-events-none absolute inset-x-3 -bottom-px h-0.5 rounded-full transition-all ${
+                      selected ? 'bg-primary' : 'bg-transparent'
+                    }`}
+                  />
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -563,33 +1018,15 @@ export function AutoReplySettingsDialog({
                 </label>
               </div>
 
-              {/* Card stack (not a table) */}
-              <div className="rounded-xl border border-border/70 divide-y divide-border/60 overflow-hidden bg-white">
-                {displayedAnswers.map((answer, i) => (
-                  <div
+              {/* Predefined Answers tree */}
+              <div className="space-y-3">
+                {displayedAnswers.map((answer) => (
+                  <AnswerNode
                     key={answer.id}
-                    className={`group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-muted/30 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                  >
-                    <div
-                      className="w-6 h-6 shrink-0 rounded-md bg-muted text-muted-foreground flex items-center justify-center font-mono"
-                      style={{ fontSize: '11px', fontWeight: 600 }}
-                    >
-                      {String.fromCharCode(65 + i)}
-                    </div>
-                    <p
-                      className={`flex-1 text-foreground leading-snug ${isRTL ? 'text-right' : 'text-left'}`}
-                      style={{ fontSize: 'var(--text-sm)' }}
-                    >
-                      {answer.text}
-                    </p>
-                    <span
-                      className="inline-flex items-center gap-0.5 px-2.5 h-6 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-mono tabular-nums"
-                      style={{ fontSize: '11px', fontWeight: 600 }}
-                    >
-                      {answer.weight}
-                      <span className="text-emerald-500/70">%</span>
-                    </span>
-                  </div>
+                    answer={answer}
+                    depth={0}
+                    isRTL={isRTL}
+                  />
                 ))}
               </div>
             </div>
@@ -605,7 +1042,7 @@ export function AutoReplySettingsDialog({
               <div className="overflow-hidden min-h-0">
                 <div>
                   <div
-                    className={`flex items-end justify-between mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                    className={`flex items-end justify-between mb-3 gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
                   >
                     <SectionEyebrow
                       step="04"
@@ -614,14 +1051,23 @@ export function AutoReplySettingsDialog({
                       isRTL={isRTL}
                       noMargin
                     />
-                    <button
-                      type="button"
-                      className={`flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                      style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}
+                    <div
+                      className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
                     >
-                      <Info className="w-3.5 h-3.5" />
-                      {t('autoReply.tabForInstructions')}
-                    </button>
+                      <QueryStatusBadge
+                        status={validationStatus}
+                        t={t}
+                        isRTL={isRTL}
+                      />
+                      <button
+                        type="button"
+                        className={`flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                        style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                        {t('autoReply.tabForInstructions')}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Canvas */}
@@ -660,33 +1106,90 @@ export function AutoReplySettingsDialog({
                           isRTL={isRTL}
                           t={t}
                           isReadOnly={isReadOnly}
+                          errors={validationErrors}
                         />
                       )}
                     </div>
 
-                    {/* Check Inquiry footer inside canvas */}
+                    {/* BR 1.1 — Validate & Execute (footer inside canvas) */}
                     {!isReadOnly && (
                       <div
                         className={`relative flex items-center justify-end gap-2 px-4 py-3 border-t border-border/60 bg-white/60 backdrop-blur-sm ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
                       >
                         <button
                           type="button"
-                          onClick={checkInquiry}
+                          onClick={handleValidateAndExecute}
                           disabled={!hasAnyComplete}
                           className={`inline-flex items-center gap-2 h-10 px-5 rounded-lg font-medium bg-primary text-primary-foreground shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.08)] hover:shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_4px_12px_rgba(22,101,52,0.2)] hover:-translate-y-px active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:cursor-not-allowed ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
                           style={{ fontSize: 'var(--text-sm)' }}
                         >
                           <Sparkles className="w-4 h-4" />
-                          {t('autoReply.checkInquiry')}
+                          {t('autoReply.validate.execute')}
                         </button>
                       </div>
                     )}
                   </div>
 
-                  {/* Inquiry Result */}
+                  {/* Expression-scoped validation errors (paren issues) */}
+                  {validationErrors.some((e) => e.scope === 'expression') && (
+                    <ul
+                      className={`mt-3 space-y-1 ${isRTL ? 'text-right' : 'text-left'}`}
+                      aria-live="polite"
+                    >
+                      {validationErrors
+                        .filter((e) => e.scope === 'expression')
+                        .map((err, idx) => (
+                          <li
+                            key={`${err.code}-${idx}`}
+                            className={`flex items-start gap-1.5 text-destructive ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                            style={{ fontSize: '12px' }}
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              <span className="font-mono font-semibold mr-1.5">
+                                {err.code}
+                              </span>
+                              {t(`autoReply.iem.${err.code}`)}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+
+                  {/* BR 5.1 — Execution failure banner (BNM 0) */}
+                  {executionError && (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-xl border border-destructive/40 bg-destructive/[0.06] px-4 py-3 animate-in fade-in slide-in-from-top-1 duration-200"
+                    >
+                      <div
+                        className={`flex items-start gap-2.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                      >
+                        <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                        <div className={`flex-1 ${isRTL ? 'text-right' : 'text-left'}`}>
+                          <p
+                            className="text-destructive uppercase font-semibold"
+                            style={{ fontSize: '10px', letterSpacing: '0.12em' }}
+                          >
+                            <span className="font-mono mr-1.5">BNM 0</span>
+                            {t('autoReply.exec.failedHeader')}
+                          </p>
+                          <p
+                            className="text-foreground mt-0.5"
+                            style={{ fontSize: 'var(--text-sm)' }}
+                          >
+                            {executionError}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Query Result banner — inline (replaces popup), Figma 8:3354 */}
                   {inquiryResult && (
-                    <div ref={inquiryRef}>
-                      <InquiryResultPanel result={inquiryResult} t={t} isRTL={isRTL} />
+                    <div ref={inquiryRef} className="mt-4 space-y-4">
+                      <QueryResultBanner result={inquiryResult} t={t} isRTL={isRTL} />
+                      <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
                     </div>
                   )}
                 </div>
@@ -737,7 +1240,166 @@ export function AutoReplySettingsDialog({
           </div>
         </div>
       </SheetContent>
+
+      {/*
+        RuntimeInputDialog is intentionally not mounted in preview mode —
+        the design calls for an inline result banner instead of a popup.
+        The component remains in the file for the real-integration path.
+      */}
     </Sheet>
+  );
+}
+
+// ── Answer Node (recursive tree) ──────────────────────────────────────────────
+
+interface AnswerNodeProps {
+  answer: AutoReplyAnswer;
+  depth: number;
+  isRTL: boolean;
+}
+
+function AnswerNode({ answer, depth, isRTL }: AnswerNodeProps) {
+  const [isExpanded, setIsExpanded] = useState<boolean>(depth === 0);
+  const hasBranch = !!answer.subQuestion && answer.subQuestion.answers.length > 0;
+
+  // Top-level rows are the light grey "card" surface from the Figma design.
+  // Nested rows sit inside that card as white pills with a hairline border.
+  const isTopLevel = depth === 0;
+  const surfaceClass = isTopLevel
+    ? 'rounded-xl bg-[#f9f9f9] overflow-hidden'
+    : 'rounded-xl bg-white border border-[#eee] overflow-hidden';
+  const rowPaddingY = isTopLevel ? 'py-3' : 'py-2';
+  const titleSize = isTopLevel ? '16px' : '14px';
+
+  const RowTag = hasBranch ? 'button' : 'div';
+
+  return (
+    <div className={surfaceClass}>
+      <RowTag
+        type={hasBranch ? 'button' : undefined}
+        onClick={hasBranch ? () => setIsExpanded((v) => !v) : undefined}
+        className={`w-full flex items-center gap-3 px-4 ${rowPaddingY} ${
+          hasBranch ? 'cursor-pointer hover:bg-black/[0.02] active:bg-black/[0.04]' : 'cursor-default'
+        } ${isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'}`}
+      >
+        {/* Weight pill — sits at the leading edge in either direction */}
+        <span
+          className="inline-flex items-center justify-center px-2.5 h-6 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-medium tabular-nums shrink-0"
+          style={{ fontSize: '12px', fontWeight: 500 }}
+        >
+          {answer.weight}%
+        </span>
+
+        {/* Text + #id stacked, aligned to start of the row */}
+        <div
+          className={`flex-1 min-w-0 flex flex-col gap-0.5 ${
+            isRTL ? 'items-end' : 'items-start'
+          }`}
+        >
+          <span
+            className="text-foreground leading-tight truncate max-w-full"
+            style={{ fontSize: titleSize, fontWeight: 500 }}
+          >
+            {answer.text}
+          </span>
+          <span className="text-[#64748b] leading-none" style={{ fontSize: '12px' }}>
+            #{answer.id}
+          </span>
+        </div>
+
+        {/* Trailing chevron only when this answer has a nested sub-question */}
+        {hasBranch && (
+          <ChevronDown
+            className={`w-5 h-5 text-[#384250] shrink-0 transition-transform duration-200 ${
+              isExpanded ? 'rotate-180' : ''
+            }`}
+            aria-hidden="true"
+          />
+        )}
+      </RowTag>
+
+      {/* Nested branch — sub-question label + child answers */}
+      {hasBranch && answer.subQuestion && (
+        <div
+          className={`grid transition-all ease-[cubic-bezier(0.16,1,0.3,1)] duration-300 ${
+            isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          }`}
+        >
+          <div className="overflow-hidden min-h-0">
+            <div className={`px-4 pb-4 space-y-2.5 ${isRTL ? 'text-right' : 'text-left'}`}>
+              {/* Sub-question label as a soft green pill */}
+              <div className={`flex ${isRTL ? 'justify-end' : 'justify-start'}`}>
+                <span
+                  className="inline-flex items-center px-2.5 h-6 rounded-full bg-[rgba(27,131,84,0.09)] text-[#085d3a] font-medium"
+                  style={{ fontSize: '13px' }}
+                >
+                  {answer.subQuestion.title}
+                </span>
+              </div>
+
+              {/* Recursive children */}
+              <div className="space-y-2">
+                {answer.subQuestion.answers.map((child) => (
+                  <AnswerNode key={child.id} answer={child} depth={depth + 1} isRTL={isRTL} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Query Status Badge (BR 3.1) ───────────────────────────────────────────────
+
+function QueryStatusBadge({
+  status,
+  t,
+  isRTL,
+}: {
+  status: ValidationStatus;
+  t: (key: string) => string;
+  isRTL: boolean;
+}) {
+  const variant = (() => {
+    if (status === 'valid') {
+      return {
+        ring: 'ring-emerald-200/70',
+        bg: 'bg-emerald-50/70',
+        text: 'text-emerald-700',
+        dot: 'bg-emerald-500',
+      };
+    }
+    if (status === 'invalid') {
+      return {
+        ring: 'ring-destructive/40',
+        bg: 'bg-destructive/5',
+        text: 'text-destructive',
+        dot: 'bg-destructive',
+      };
+    }
+    return {
+      ring: 'ring-border',
+      bg: 'bg-muted/50',
+      text: 'text-muted-foreground',
+      dot: 'bg-muted-foreground/60',
+    };
+  })();
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full ring-1 ring-inset ${variant.ring} ${variant.bg} ${variant.text} ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em' }}
+      role="status"
+      aria-label={`${t('autoReply.status.label')}: ${t(`autoReply.status.${status}`)}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${variant.dot}`} aria-hidden="true" />
+      <span className="uppercase" style={{ fontSize: '10px', letterSpacing: '0.08em' }}>
+        {t('autoReply.status.label')}
+      </span>
+      <span className="font-mono">{t(`autoReply.status.${status}`)}</span>
+    </span>
   );
 }
 
@@ -811,6 +1473,95 @@ function EmptyEditor({
         </p>
       </div>
     </button>
+  );
+}
+
+// ── Query Result Banner (Figma 8:3354) ────────────────────────────────────────
+
+/**
+ * Inline result banner that replaces the popup in B09.U24 preview mode.
+ * Light-green pill for matched answers, soft-red for failure. Sits directly
+ * below the query builder canvas.
+ */
+function QueryResultBanner({
+  result,
+  t,
+  isRTL,
+}: {
+  result: InquiryResult;
+  t: (key: string) => string;
+  isRTL: boolean;
+}) {
+  const success = result.success;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`rounded-2xl px-5 py-4 ${
+        success
+          ? 'bg-[#ecfdf3] ring-1 ring-emerald-200/60 ring-inset'
+          : 'bg-rose-50 ring-1 ring-rose-200/60 ring-inset'
+      }`}
+    >
+      <div className={`flex flex-col ${isRTL ? 'items-end text-right' : 'items-start text-left'}`}>
+        <p
+          className={`${success ? 'text-primary' : 'text-rose-700'}`}
+          style={{ fontSize: '15px', fontWeight: 700, lineHeight: 1.25 }}
+        >
+          {t('autoReply.queryResult.title')}
+        </p>
+        <p
+          className="text-foreground mt-1"
+          style={{ fontSize: 'var(--text-base)', fontWeight: 500, lineHeight: 1.45 }}
+        >
+          {success ? result.answer : result.message}
+        </p>
+        {success && result.elapsedMs != null && (
+          <p
+            className={`text-muted-foreground mt-2 flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+            style={{ fontSize: 'var(--text-xs)' }}
+          >
+            <Clock className="w-3 h-3" />
+            {t('autoReply.resolvedIn').replace('{ms}', String(result.elapsedMs))}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Read-only "Query Preview" field that shows the human-readable form of the
+ * executed query. For Question Automation this is just the question title.
+ */
+function QueryPreviewField({
+  question,
+  t,
+  isRTL,
+}: {
+  question: string;
+  t: (key: string) => string;
+  isRTL: boolean;
+}) {
+  return (
+    <div className={`flex flex-col gap-2 ${isRTL ? 'items-end' : 'items-start'}`}>
+      <label
+        className="text-foreground"
+        style={{ fontSize: 'var(--text-sm)', fontWeight: 500 }}
+      >
+        {t('autoReply.queryPreview.label')}
+      </label>
+      <div
+        className={`w-full rounded-md bg-muted/60 px-4 h-10 inline-flex items-center ${isRTL ? 'justify-end text-right' : 'justify-start text-left'}`}
+      >
+        <p
+          className="text-muted-foreground truncate"
+          style={{ fontSize: 'var(--text-sm)' }}
+        >
+          {question}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -912,40 +1663,62 @@ interface ExpressionEditorProps {
   isRTL: boolean;
   t: (key: string) => string;
   isReadOnly?: boolean;
+  /**
+   * Active validation errors. The editor highlights the conditions referenced
+   * by `conditionId` and shows the matching IEM message under them. Expression
+   * scoped errors (paren issues) are rendered by the parent below the canvas.
+   */
+  errors?: ValidationError[];
 }
 
 function ExpressionEditor(props: ExpressionEditorProps) {
-  const { expression, addCondition, isRTL, t, isReadOnly } = props;
+  const { expression, addCondition, isRTL, t, isReadOnly, errors } = props;
   return (
     <div className="flex flex-col gap-1">
-      {expression.conditions.map((condition, idx) => (
-        <div key={condition.id}>
-          {idx > 0 && (
-            <Connector
-              connector={expression.connectors[idx - 1]}
-              onToggle={() => props.toggleConnector(idx - 1)}
-              isRTL={isRTL}
+      {expression.conditions.map((condition, idx) => {
+        const rowErrors = (errors ?? []).filter(
+          (e) => e.scope === 'condition' && e.conditionId === condition.id
+        );
+        return (
+          <div key={condition.id}>
+            {idx > 0 && (
+              <Connector
+                connector={expression.connectors[idx - 1]}
+                onToggle={() => props.toggleConnector(idx - 1)}
+                isRTL={isRTL}
+              />
+            )}
+            <ConditionBlock
+              {...props}
+              condition={condition}
+              t={t}
+              rowErrors={rowErrors}
             />
-          )}
-          <ConditionBlock
-            {...props}
-            condition={condition}
-            isFirst={idx === 0}
-            t={t}
-          />
-        </div>
-      ))}
+          </div>
+        );
+      })}
       {!isReadOnly && (
-        <div className={`flex items-center gap-2 pt-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div
+          className={`flex items-center gap-2 pt-3 flex-wrap ${
+            isRTL ? 'flex-row-reverse' : 'flex-row'
+          }`}
+        >
+          <span
+            className="text-muted-foreground"
+            style={{ fontSize: 'var(--text-xs)' }}
+          >
+            {t('autoReply.editor.addAnotherIf')}
+          </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => addCondition('AND')}
             className={`h-7 px-2.5 flex items-center gap-1 bg-white/80 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
             style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+            title={t('autoReply.editor.addIfAndTitle')}
           >
             <Plus className="w-3 h-3" />
-            AND
+            {t('autoReply.editor.ifAnd')}
           </Button>
           <Button
             variant="outline"
@@ -953,9 +1726,10 @@ function ExpressionEditor(props: ExpressionEditorProps) {
             onClick={() => addCondition('OR')}
             className={`h-7 px-2.5 flex items-center gap-1 bg-white/80 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
             style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+            title={t('autoReply.editor.addIfOrTitle')}
           >
             <Plus className="w-3 h-3" />
-            OR
+            {t('autoReply.editor.ifOr')}
           </Button>
         </div>
       )}
@@ -994,12 +1768,11 @@ function Connector({
 
 interface ConditionBlockProps extends ExpressionEditorProps {
   condition: Condition;
-  isFirst: boolean;
+  rowErrors?: ValidationError[];
 }
 
 function ConditionBlock({
   condition,
-  isFirst,
   openedPicker,
   setOpenedPicker,
   searchTerm,
@@ -1010,6 +1783,7 @@ function ConditionBlock({
   isRTL,
   t,
   isReadOnly,
+  rowErrors,
 }: ConditionBlockProps) {
   const activeStep =
     !isReadOnly && openedPicker?.id === condition.id ? openedPicker.step : null;
@@ -1025,16 +1799,36 @@ function ConditionBlock({
     );
   };
 
+  const hasError = !!rowErrors && rowErrors.length > 0;
   return (
+    <div className="flex flex-col gap-0">
     <div
-      className={`group relative flex flex-wrap items-center gap-1.5 px-2 py-2 rounded-xl transition-colors hover:bg-white/70 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      className={`group relative flex flex-wrap items-center gap-1.5 px-2 py-2 rounded-xl transition-colors ${
+        hasError
+          ? 'bg-destructive/5 ring-1 ring-destructive/50 ring-inset hover:bg-destructive/[0.07]'
+          : 'hover:bg-white/70'
+      } ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+      aria-invalid={hasError || undefined}
     >
-      {isFirst && (
+      {/*
+        Every condition is its own "If" — multiple Ifs (each with its own
+        operator + value) joined by AND/OR connectors at the row boundaries.
+      */}
+      <span
+        className="text-muted-foreground px-1 font-mono italic"
+        style={{ fontSize: 'var(--text-sm)' }}
+      >
+        {t('autoReply.editor.if')}
+      </span>
+
+      {/* Open paren — manual grouping for Scenario 3 */}
+      {condition.openParen && (
         <span
-          className="text-muted-foreground px-1 font-mono italic"
-          style={{ fontSize: 'var(--text-sm)' }}
+          className="text-primary font-mono font-bold select-none"
+          style={{ fontSize: '18px', lineHeight: 1 }}
+          aria-hidden="true"
         >
-          {t('autoReply.editor.if')}
+          (
         </span>
       )}
 
@@ -1124,6 +1918,7 @@ function ConditionBlock({
         <SlotPopover
           open={activeStep === 'operator'}
           onOpenChange={(o) => (o ? handleOpen('operator') : handleClose('operator'))}
+          width="w-72"
           trigger={
             <Pill
               label={condition.operator ?? ''}
@@ -1138,34 +1933,105 @@ function ConditionBlock({
             type={condition.elementType}
             onPick={(op) => pickValue('operator', op)}
             t={t}
+            isRTL={isRTL}
           />
         </SlotPopover>
       )}
 
-      {/* Value */}
+      {/* Value (type-aware per BR 1.3) */}
       {condition.operator && valueRequiresInput(condition.operator) && (
-        <input
-          type="text"
-          value={condition.value ?? ''}
-          onChange={(e) => updateCondition(condition.id, { value: e.target.value })}
-          placeholder={t('autoReply.editor.enterValue')}
-          readOnly={isReadOnly}
-          className={`h-8 px-2.5 rounded-lg border border-border bg-white text-foreground w-24 font-mono tabular-nums outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/20 transition-all duration-150 read-only:bg-muted/40 read-only:cursor-default ${isRTL ? 'text-right' : 'text-left'}`}
-          style={{ fontSize: '13px' }}
+        <ValueInput
+          condition={condition}
+          isRTL={isRTL}
+          isReadOnly={!!isReadOnly}
+          t={t}
+          onChange={(patch) => updateCondition(condition.id, patch)}
         />
       )}
 
-      {/* Remove (hover-reveal) */}
-      {!isReadOnly && (
-        <button
-          type="button"
-          onClick={() => removeCondition(condition.id)}
-          className={`h-7 w-7 ${isRTL ? 'mr-auto' : 'ml-auto'} inline-flex items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all duration-150`}
-          aria-label={t('autoReply.editor.removeCondition')}
+      {/* Close paren — manual grouping for Scenario 3 */}
+      {condition.closeParen && (
+        <span
+          className="text-primary font-mono font-bold select-none"
+          style={{ fontSize: '18px', lineHeight: 1 }}
+          aria-hidden="true"
         >
-          <CloseIcon className="w-3.5 h-3.5" />
-        </button>
+          )
+        </span>
       )}
+
+      {/* Trailing action cluster — paren toggles + remove */}
+      {!isReadOnly && (
+        <div
+          className={`inline-flex items-center gap-0.5 ${isRTL ? 'mr-auto' : 'ml-auto'}`}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              updateCondition(condition.id, { openParen: !condition.openParen })
+            }
+            aria-pressed={!!condition.openParen}
+            aria-label={t('autoReply.editor.toggleOpenParen')}
+            title={t('autoReply.editor.toggleOpenParen')}
+            className={`h-7 w-7 inline-flex items-center justify-center rounded-md font-mono font-semibold transition-all duration-150 ${
+              condition.openParen
+                ? 'text-primary bg-primary/10 hover:bg-primary/15 opacity-100'
+                : 'text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground'
+            }`}
+            style={{ fontSize: '14px' }}
+          >
+            (
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              updateCondition(condition.id, { closeParen: !condition.closeParen })
+            }
+            aria-pressed={!!condition.closeParen}
+            aria-label={t('autoReply.editor.toggleCloseParen')}
+            title={t('autoReply.editor.toggleCloseParen')}
+            className={`h-7 w-7 inline-flex items-center justify-center rounded-md font-mono font-semibold transition-all duration-150 ${
+              condition.closeParen
+                ? 'text-primary bg-primary/10 hover:bg-primary/15 opacity-100'
+                : 'text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground'
+            }`}
+            style={{ fontSize: '14px' }}
+          >
+            )
+          </button>
+          <button
+            type="button"
+            onClick={() => removeCondition(condition.id)}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all duration-150"
+            aria-label={t('autoReply.editor.removeCondition')}
+          >
+            <CloseIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+
+    {/* BR 2.1 / 2.2 — inline IEM messages for this condition */}
+    {hasError && (
+      <ul
+        className={`mt-1 mb-1 mx-2 space-y-0.5 ${isRTL ? 'text-right' : 'text-left'}`}
+        aria-live="polite"
+      >
+        {rowErrors!.map((err, idx) => (
+          <li
+            key={`${err.code}-${idx}`}
+            className={`text-destructive flex items-start gap-1.5 ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
+            style={{ fontSize: '11px' }}
+          >
+            <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+            <span>
+              <span className="font-mono font-semibold mr-1.5">{err.code}</span>
+              {t(`autoReply.iem.${err.code}`)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    )}
     </div>
   );
 }
@@ -1181,6 +2047,95 @@ function Separator() {
   );
 }
 
+// ── Value Input (type-aware per BR 1.3) ───────────────────────────────────────
+
+interface ValueInputProps {
+  condition: Condition;
+  isRTL: boolean;
+  isReadOnly: boolean;
+  onChange: (patch: Partial<Condition>) => void;
+  t: (key: string) => string;
+}
+
+function ValueInput({ condition, isRTL, isReadOnly, onChange, t }: ValueInputProps) {
+  const type = condition.elementType ?? 'String';
+  const isRange = isRangeOperator(condition.operator);
+
+  // Shared classnames so every variant feels like one family.
+  const baseClass = `h-8 px-2.5 rounded-lg border border-border bg-white text-foreground font-mono tabular-nums outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/20 transition-all duration-150 read-only:bg-muted/40 read-only:cursor-default disabled:bg-muted/40 disabled:cursor-not-allowed ${isRTL ? 'text-right' : 'text-left'}`;
+
+  // Boolean → dropdown answers the original question: it should be a dropdown,
+  // not a free-form input — the operator only accepts true/false.
+  if (type === 'Boolean') {
+    return (
+      <select
+        value={condition.value ?? ''}
+        onChange={(e) => onChange({ value: e.target.value })}
+        disabled={isReadOnly}
+        aria-label={`${condition.element ?? 'value'} — ${condition.operator ?? ''}`}
+        className={`${baseClass} w-28 pr-7 appearance-none cursor-pointer`}
+        style={{ fontSize: '13px' }}
+      >
+        <option value="" disabled>
+          {t('autoReply.editor.pickValue')}
+        </option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+    );
+  }
+
+  // Single-input number / date / text.
+  if (!isRange) {
+    const htmlType = type === 'Number' ? 'number' : type === 'Date' ? 'date' : 'text';
+    return (
+      <input
+        type={htmlType}
+        value={condition.value ?? ''}
+        onChange={(e) => onChange({ value: e.target.value })}
+        placeholder={t('autoReply.editor.enterValue')}
+        readOnly={isReadOnly}
+        aria-label={`${condition.element ?? 'value'} — ${condition.operator ?? ''}`}
+        className={`${baseClass} ${type === 'Date' ? 'w-40' : 'w-24'}`}
+        style={{ fontSize: '13px' }}
+      />
+    );
+  }
+
+  // Range — two inputs joined by "and". Number / Date supported; falls back to text.
+  const rangeHtmlType = type === 'Number' ? 'number' : type === 'Date' ? 'date' : 'text';
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+      <input
+        type={rangeHtmlType}
+        value={condition.value ?? ''}
+        onChange={(e) => onChange({ value: e.target.value })}
+        placeholder={t('autoReply.editor.rangeFrom')}
+        readOnly={isReadOnly}
+        aria-label={`${condition.element ?? 'value'} — ${condition.operator ?? ''} (lower bound)`}
+        className={`${baseClass} ${type === 'Date' ? 'w-36' : 'w-20'}`}
+        style={{ fontSize: '13px' }}
+      />
+      <span
+        className="text-muted-foreground uppercase font-mono"
+        style={{ fontSize: '10px', letterSpacing: '0.15em' }}
+      >
+        {t('autoReply.editor.rangeAnd')}
+      </span>
+      <input
+        type={rangeHtmlType}
+        value={condition.value2 ?? ''}
+        onChange={(e) => onChange({ value2: e.target.value })}
+        placeholder={t('autoReply.editor.rangeTo')}
+        readOnly={isReadOnly}
+        aria-label={`${condition.element ?? 'value'} — ${condition.operator ?? ''} (upper bound)`}
+        className={`${baseClass} ${type === 'Date' ? 'w-36' : 'w-20'}`}
+        style={{ fontSize: '13px' }}
+      />
+    </span>
+  );
+}
+
 // ── Slot Popover wrapper ──────────────────────────────────────────────────────
 
 function SlotPopover({
@@ -1188,11 +2143,14 @@ function SlotPopover({
   onOpenChange,
   trigger,
   children,
+  width = 'w-60',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: React.ReactNode;
   children: React.ReactNode;
+  /** Tailwind width utility for the popover content (e.g. `w-60`, `w-72`). */
+  width?: string;
 }) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -1200,7 +2158,7 @@ function SlotPopover({
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="p-0 w-60 max-h-72 overflow-hidden flex flex-col rounded-lg border border-border shadow-[0_10px_30px_-10px_rgba(0,0,0,0.18)] bg-white"
+        className={`p-0 ${width} max-h-80 overflow-hidden flex flex-col rounded-lg border border-border shadow-[0_10px_30px_-10px_rgba(0,0,0,0.18)] bg-white`}
       >
         {children}
       </PopoverContent>
@@ -1433,27 +2391,313 @@ function OperatorList({
   type,
   onPick,
   t,
+  isRTL,
 }: {
   type?: ElementDataType;
   onPick: (op: string) => void;
   t: (k: string) => string;
+  isRTL: boolean;
 }) {
   const ops = operatorsForType(type);
+
+  // Group operators by category while preserving operator order inside each group.
+  const grouped = ops.reduce<Record<OperatorCategory, OperatorOption[]>>(
+    (acc, op) => {
+      const bucket = acc[op.category] ?? [];
+      bucket.push(op);
+      acc[op.category] = bucket;
+      return acc;
+    },
+    {} as Record<OperatorCategory, OperatorOption[]>
+  );
+
   return (
     <>
-      <ListHeader title={t('autoReply.editor.chooseOperator')} isRTL={false} />
-      <div className="p-2 grid grid-cols-3 gap-1">
-        {ops.map((op) => (
-          <button
-            key={op}
-            onClick={() => onPick(op)}
-            className="px-2 py-1.5 rounded-md border border-border hover:bg-muted hover:border-primary/30 text-foreground transition-colors font-mono"
-            style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
-          >
-            {op}
-          </button>
-        ))}
+      <ListHeader title={t('autoReply.editor.chooseOperator')} isRTL={isRTL} />
+      <div className="overflow-y-auto py-2">
+        {OPERATOR_CATEGORY_ORDER.map((cat) => {
+          const items = grouped[cat];
+          if (!items || items.length === 0) return null;
+          // Symbol-only categories (comparison) tile tighter; word categories breathe.
+          const isCompactCategory = cat === 'comparison';
+          return (
+            <div key={cat} className="px-2 pb-2 last:pb-1">
+              <div
+                className={`px-1 pb-1 text-muted-foreground uppercase font-semibold ${isRTL ? 'text-right' : 'text-left'}`}
+                style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+              >
+                {t(`autoReply.editor.opCategory.${cat}`)}
+              </div>
+              <div
+                className={`grid gap-1 ${isCompactCategory ? 'grid-cols-3' : 'grid-cols-2'}`}
+              >
+                {items.map((op) => (
+                  <button
+                    key={op.symbol}
+                    type="button"
+                    onClick={() => onPick(op.symbol)}
+                    className="px-2 py-1.5 rounded-md border border-border hover:bg-muted hover:border-primary/30 text-foreground transition-colors font-mono truncate"
+                    style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
+                    title={op.symbol}
+                  >
+                    {op.symbol}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </>
+  );
+}
+
+// ── Runtime Input Dialog (BR 1.x / BR 2.x) ────────────────────────────────────
+
+interface RuntimeInputDialogProps {
+  open: boolean;
+  onClose: () => void;
+  inputs: RuntimeInputDef[];
+  onSubmit: (values: Record<string, string>) => void;
+  t: (key: string) => string;
+  isRTL: boolean;
+}
+
+interface FieldState {
+  value: string;
+  error: string | null;
+}
+
+function htmlInputTypeFor(t: ElementDataType): string {
+  if (t === 'Number') return 'number';
+  if (t === 'Date') return 'date';
+  return 'text';
+}
+
+function validateField(value: string, type: ElementDataType): string | null {
+  // BR 2.1 — required
+  if (value === '' || value === undefined) return 'errorRequired';
+  // BR 2.2 — type validation
+  if (type === 'Number' && !Number.isFinite(Number(value))) return 'errorType';
+  if (type === 'Date' && !Number.isFinite(Date.parse(value))) return 'errorType';
+  if (type === 'Boolean' && value !== 'true' && value !== 'false') return 'errorType';
+  return null;
+}
+
+function RuntimeInputDialog({
+  open,
+  onClose,
+  inputs,
+  onSubmit,
+  t,
+  isRTL,
+}: RuntimeInputDialogProps) {
+  const [fields, setFields] = useState<Record<string, FieldState>>({});
+
+  // Reset field state whenever the dialog opens or the input set changes.
+  useEffect(() => {
+    if (!open) return;
+    const next: Record<string, FieldState> = {};
+    inputs.forEach((i) => {
+      next[i.key] = { value: '', error: null };
+    });
+    setFields(next);
+  }, [open, inputs]);
+
+  if (!open) return null;
+
+  const setFieldValue = (key: string, value: string) => {
+    setFields((prev) => ({
+      ...prev,
+      [key]: { value, error: null },
+    }));
+  };
+
+  const handleSubmit = () => {
+    // BR 2.3 — block submission until everything passes both checks
+    const validated: Record<string, FieldState> = {};
+    let anyError = false;
+    inputs.forEach((i) => {
+      const current = fields[i.key]?.value ?? '';
+      const err = validateField(current, i.type);
+      validated[i.key] = { value: current, error: err };
+      if (err) anyError = true;
+    });
+    setFields(validated);
+    if (anyError) return;
+
+    // BR 2.4 — proceed
+    const values: Record<string, string> = {};
+    inputs.forEach((i) => {
+      values[i.key] = validated[i.key].value;
+    });
+    onSubmit(values);
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('autoReply.runtime.title')}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      dir={isRTL ? 'rtl' : 'ltr'}
+    >
+      <button
+        type="button"
+        aria-label={t('autoReply.runtime.cancel')}
+        onClick={onClose}
+        className="absolute inset-0 bg-foreground/40 backdrop-blur-[2px] animate-in fade-in duration-150"
+      />
+
+      <div className="relative w-full max-w-lg max-h-[85vh] flex flex-col bg-card rounded-2xl border border-border shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] animate-in fade-in zoom-in-95 duration-200">
+        {/* Header */}
+        <div className={`flex items-start gap-3 px-6 pt-6 pb-4 border-b border-border/60 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
+          <div className="shrink-0 w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+            <Variable className="w-5 h-5" />
+          </div>
+          <div className={`flex-1 min-w-0 ${isRTL ? 'text-right' : 'text-left'}`}>
+            <h3
+              className="text-foreground"
+              style={{ fontSize: '18px', fontWeight: 600, letterSpacing: '-0.005em' }}
+            >
+              {t('autoReply.runtime.title')}
+            </h3>
+            <p
+              className="text-muted-foreground mt-1 leading-snug"
+              style={{ fontSize: 'var(--text-xs)' }}
+            >
+              {t('autoReply.runtime.subtitle')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('autoReply.runtime.cancel')}
+            className="shrink-0 w-8 h-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors inline-flex items-center justify-center"
+          >
+            <CloseIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body — dynamically generated fields per BR 1.3 */}
+        <div className="overflow-y-auto px-6 py-5">
+          {inputs.length === 0 ? (
+            <p
+              className={`text-muted-foreground ${isRTL ? 'text-right' : 'text-left'}`}
+              style={{ fontSize: 'var(--text-sm)' }}
+            >
+              {t('autoReply.runtime.noElements')}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {inputs.map((def) => {
+                const state = fields[def.key] ?? { value: '', error: null };
+                const hasError = !!state.error;
+                return (
+                  <div key={def.key}>
+                    {/* BR 1.4 — clear label per field */}
+                    <div
+                      className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                    >
+                      <label
+                        htmlFor={`runtime-${def.key}`}
+                        className="text-foreground font-mono"
+                        style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
+                      >
+                        {def.element}
+                      </label>
+                      <span
+                        className="text-muted-foreground uppercase font-mono"
+                        style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+                      >
+                        {def.type}
+                      </span>
+                      <span
+                        className="text-destructive font-mono"
+                        style={{ fontSize: '10px', fontWeight: 600 }}
+                        aria-hidden="true"
+                      >
+                        {t('autoReply.runtime.required')}
+                      </span>
+                      <span
+                        className={`text-muted-foreground/70 truncate ${isRTL ? 'mr-auto text-left' : 'ml-auto text-right'}`}
+                        style={{ fontSize: '11px' }}
+                      >
+                        {def.domain} · {def.source}
+                      </span>
+                    </div>
+
+                    {def.type === 'Boolean' ? (
+                      <select
+                        id={`runtime-${def.key}`}
+                        value={state.value}
+                        onChange={(e) => setFieldValue(def.key, e.target.value)}
+                        aria-invalid={hasError}
+                        className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
+                          hasError ? 'border-destructive focus:border-destructive' : 'border-border focus:border-primary/60'
+                        } ${isRTL ? 'text-right' : 'text-left'}`}
+                        style={{ fontSize: '14px' }}
+                      >
+                        <option value="" disabled>
+                          {t('autoReply.editor.pickValue')}
+                        </option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    ) : (
+                      <input
+                        id={`runtime-${def.key}`}
+                        type={htmlInputTypeFor(def.type)}
+                        value={state.value}
+                        onChange={(e) => setFieldValue(def.key, e.target.value)}
+                        placeholder={t('autoReply.editor.enterValue')}
+                        aria-invalid={hasError}
+                        className={`w-full h-10 px-3 rounded-lg bg-white text-foreground border outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150 font-mono ${
+                          hasError ? 'border-destructive focus:border-destructive' : 'border-border focus:border-primary/60'
+                        } ${isRTL ? 'text-right' : 'text-left'}`}
+                        style={{ fontSize: '14px' }}
+                      />
+                    )}
+
+                    {hasError && (
+                      <p
+                        className={`mt-1.5 text-destructive flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                        style={{ fontSize: '11px' }}
+                      >
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        {t(`autoReply.runtime.${state.error}`)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className={`flex items-center justify-end gap-2 px-6 py-4 border-t border-border/60 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+        >
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            className="h-9 px-4 font-medium"
+            style={{ fontSize: 'var(--text-sm)' }}
+          >
+            {t('autoReply.runtime.cancel')}
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={inputs.length === 0}
+            className={`h-9 px-5 font-medium inline-flex items-center gap-2 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+            style={{ fontSize: 'var(--text-sm)' }}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {t('autoReply.runtime.submit')}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

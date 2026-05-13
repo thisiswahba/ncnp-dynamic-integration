@@ -1,13 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, ChevronDown, MoreVertical, ExternalLink, Eye, Pencil, Power, PowerOff } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useState } from 'react';
+import { Search, Filter, ChevronDown, Pencil } from 'lucide-react';
 import { Badge } from '@/app/components/ui/badge';
 import { Button } from '@/app/components/ui/button';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import { useLanguage } from '@/app/contexts/language-context';
 import {
   AutoReplySettingsDialog,
-  type AutoReplyMode,
   type AutoReplyContext,
   type AutoReplyQuestion,
   type PreloadedQuery,
@@ -37,13 +35,54 @@ const mockQueries: Query[] = [
   { id: '7', queryId: '#QRY-1007', linkedItem: 'Service Coverage Risk', linkedType: 'risk', linkedId: '#R-203', businessDomain: 'Operations', status: 'activated', lastUpdated: '10/11/2024', createdBy: 'Ahmed K.' },
 ];
 
-// Mock expressions for each query — in production these would come from the backend
+// Mock expressions for each query — in production these would come from the backend.
+// The "question" variant exercises the nested Predefined Answers tree so the
+// auto-reply settings dialog renders the full Figma design (branching answers
+// with a sub-question + nested options).
 function mockPreloadedForQuery(query: Query): { question: AutoReplyQuestion; preloaded: PreloadedQuery } {
   const answerOptions =
     query.linkedType === 'question'
       ? [
-          { id: 'a1', text: 'Yes, the meeting was held as scheduled.', weight: 100 },
-          { id: 'a2', text: 'No, the meeting was not held as scheduled.', weight: 20 },
+          {
+            id: 'a1',
+            text: 'Yes, the meeting was held as scheduled.',
+            weight: 80,
+          },
+          {
+            id: 'a2',
+            text: 'No, the meeting was not held as scheduled.',
+            weight: 20,
+            subQuestion: {
+              id: 'sq-no',
+              title: 'Sub-question — reason the meeting did not take place',
+              answers: [
+                {
+                  id: 'a2-1',
+                  text: 'Postponed — rescheduled within 30 days',
+                  weight: 100,
+                },
+                {
+                  id: 'a2-2',
+                  text: 'Cancelled — quorum was not reached',
+                  weight: 100,
+                },
+                {
+                  id: 'a2-3',
+                  text: 'Other — see the supporting documentation',
+                  weight: 100,
+                  subQuestion: {
+                    id: 'sq-other',
+                    title: 'Sub-question — supporting documentation type',
+                    answers: [
+                      { id: 'a2-3-1', text: 'Board minutes', weight: 100 },
+                      { id: 'a2-3-2', text: 'Email correspondence', weight: 100 },
+                      { id: 'a2-3-3', text: 'External notice', weight: 100 },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
         ]
       : [
           { id: 'a1', text: 'High — entity flagged', weight: 100 },
@@ -78,39 +117,21 @@ function mockPreloadedForQuery(query: Query): { question: AutoReplyQuestion; pre
 
 const TOTAL_ENTRIES = 127;
 
-type TabKey = 'all' | 'question' | 'risk';
-
 export function QueriesPage() {
-  const navigate = useNavigate();
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState<AutoReplyMode>('view');
   const [dialogContext, setDialogContext] = useState<AutoReplyContext>('question');
   const [activeDialogQuery, setActiveDialogQuery] = useState<{ question: AutoReplyQuestion; preloaded: PreloadedQuery } | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpenMenuId(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const filteredQueries = mockQueries.filter((query) => {
-    const matchesTab = activeTab === 'all' || query.linkedType === activeTab;
     const matchesSearch =
       query.queryId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       query.linkedItem.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
+    return matchesSearch;
   });
 
   const totalPages = 14;
@@ -134,38 +155,18 @@ export function QueriesPage() {
 
   const allSelected = filteredQueries.length > 0 && selectedIds.size === filteredQueries.length;
 
-  const openDialog = (query: Query, mode: AutoReplyMode) => {
+  /**
+   * Single row action: open the Auto Reply Settings sheet. The dialog itself
+   * owns the View / Edit tab strip; activate/deactivate already lives inside
+   * the body's Predefined Answers section.
+   */
+  const handleOpenRow = (query: Query) => {
     setActiveDialogQuery(mockPreloadedForQuery(query));
-    setDialogMode(mode);
     setDialogContext(query.linkedType === 'risk' ? 'risk' : 'question');
     setDialogOpen(true);
-    setOpenMenuId(null);
-  };
-
-  const handleView = (query: Query) => openDialog(query, 'view');
-  const handleEdit = (query: Query) => openDialog(query, 'edit');
-
-  const handleToggleStatus = (id: string) => {
-    console.log('Toggle', id);
-    setOpenMenuId(null);
-  };
-
-  const handleNavigate = (query: Query) => {
-    if (query.linkedType === 'question') {
-      navigate('/admin/questions');
-    } else {
-      navigate('/admin/risks');
-    }
-    setOpenMenuId(null);
   };
 
   const pageNumbers = () => [totalPages, '...', 3, 2, 1] as (number | string)[];
-
-  const statusCount = {
-    all: mockQueries.length,
-    question: mockQueries.filter((q) => q.linkedType === 'question').length,
-    risk: mockQueries.filter((q) => q.linkedType === 'risk').length,
-  };
 
   return (
     <div className="px-8 py-6 max-w-7xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -177,39 +178,6 @@ export function QueriesPage() {
         <p className="text-muted-foreground mt-1" style={{ fontSize: 'var(--text-sm)' }}>
           {t('queriesAdmin.subtitle')}
         </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-border mb-6">
-        <div className={`flex gap-6 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-          <TabButton
-            active={activeTab === 'all'}
-            onClick={() => {
-              setActiveTab('all');
-              setCurrentPage(1);
-            }}
-            label={t('queriesAdmin.tabs.all')}
-            count={statusCount.all}
-          />
-          <TabButton
-            active={activeTab === 'question'}
-            onClick={() => {
-              setActiveTab('question');
-              setCurrentPage(1);
-            }}
-            label={t('queriesAdmin.tabs.question')}
-            count={statusCount.question}
-          />
-          <TabButton
-            active={activeTab === 'risk'}
-            onClick={() => {
-              setActiveTab('risk');
-              setCurrentPage(1);
-            }}
-            label={t('queriesAdmin.tabs.risk')}
-            count={statusCount.risk}
-          />
-        </div>
       </div>
 
       {/* Search + Filter */}
@@ -310,9 +278,8 @@ export function QueriesPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 max-w-xs">
-                      <button
-                        onClick={() => handleNavigate(query)}
-                        className={`text-foreground hover:text-primary transition-colors ${isRTL ? 'text-right' : 'text-left'}`}
+                      <div
+                        className={`text-foreground ${isRTL ? 'text-right' : 'text-left'}`}
                         style={{ fontSize: 'var(--text-sm)' }}
                       >
                         <span className="block truncate">{query.linkedItem}</span>
@@ -322,7 +289,7 @@ export function QueriesPage() {
                         >
                           {query.linkedId}
                         </span>
-                      </button>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <Badge
@@ -360,62 +327,18 @@ export function QueriesPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <div
-                        className="relative"
-                        ref={openMenuId === query.id ? menuRef : undefined}
+                      {/* Single row action — opens the Auto Reply Settings sheet.
+                          View / Edit toggle + Activate switch live inside the dialog. */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenRow(query)}
+                        className={`h-8 inline-flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                        style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}
                       >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() =>
-                            setOpenMenuId(openMenuId === query.id ? null : query.id)
-                          }
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                        {openMenuId === query.id && (
-                          <div
-                            className={`absolute z-50 mt-1 w-56 rounded-lg border border-border bg-white shadow-lg overflow-hidden ${isRTL ? 'left-0' : 'right-0'}`}
-                          >
-                            <MenuItem
-                              icon={<Eye className="w-4 h-4" />}
-                              label={t('queriesAdmin.viewDetails')}
-                              onClick={() => handleView(query)}
-                              isRTL={isRTL}
-                            />
-                            <MenuItem
-                              icon={<Pencil className="w-4 h-4" />}
-                              label={t('queriesAdmin.editDetails')}
-                              onClick={() => handleEdit(query)}
-                              isRTL={isRTL}
-                            />
-                            {query.status === 'deactivated' ? (
-                              <MenuItem
-                                icon={<Power className="w-4 h-4 text-green-600" />}
-                                label={t('queriesAdmin.activate')}
-                                onClick={() => handleToggleStatus(query.id)}
-                                isRTL={isRTL}
-                              />
-                            ) : (
-                              <MenuItem
-                                icon={<PowerOff className="w-4 h-4 text-destructive" />}
-                                label={t('queriesAdmin.deactivate')}
-                                onClick={() => handleToggleStatus(query.id)}
-                                isRTL={isRTL}
-                                danger
-                              />
-                            )}
-                            <div className="border-t border-border" />
-                            <MenuItem
-                              icon={<ExternalLink className="w-4 h-4" />}
-                              label={t('queriesAdmin.navigateToLinkedItem')}
-                              onClick={() => handleNavigate(query)}
-                              isRTL={isRTL}
-                            />
-                          </div>
-                        )}
-                      </div>
+                        <Pencil className="w-3.5 h-3.5" />
+                        {t('queriesAdmin.openAction')}
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -484,46 +407,10 @@ export function QueriesPage() {
         onOpenChange={setDialogOpen}
         question={activeDialogQuery?.question ?? null}
         preloaded={activeDialogQuery?.preloaded ?? null}
-        mode={dialogMode}
+        mode="edit"
         context={dialogContext}
-        onRequestEdit={() => setDialogMode('edit')}
       />
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  label,
-  count,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative py-3 flex items-center gap-2 transition-colors ${
-        active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-      }`}
-      style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
-    >
-      <span>{label}</span>
-      <span
-        className={`inline-flex items-center justify-center min-w-6 h-5 px-1.5 rounded-full tabular-nums transition-colors ${
-          active ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-        }`}
-        style={{ fontSize: '11px', fontWeight: 600 }}
-      >
-        {count}
-      </span>
-      {active && (
-        <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary rounded-full" />
-      )}
-    </button>
   );
 }
 
@@ -559,27 +446,3 @@ function StatusPill({
   );
 }
 
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  isRTL,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  isRTL: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full px-3 py-2 hover:bg-muted transition-colors flex items-center gap-2.5 ${isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'} ${danger ? 'text-destructive' : 'text-foreground'}`}
-      style={{ fontSize: 'var(--text-sm)' }}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import svgPaths from '@/imports/svg-xfywb401kf';
 import { Home, FileText, Settings, Users, BarChart3, HelpCircle, Link2, Database, Search, History, Zap, ShieldAlert, UsersRound } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { useLanguage } from '@/app/contexts/language-context';
 
 interface NavDrawerProps {
@@ -118,20 +118,21 @@ function Divider() {
 
 export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking, onNavigateToAssessmentForm }: NavDrawerProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { language, t } = useLanguage();
   const isRTL = language === 'ar';
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  const [activeItem, setActiveItem] = useState<string>('data-sources');
+  const [activeItem, setActiveItem] = useState<string>('automated-queries');
 
-  const toggleSection = (sectionId: string) => {
-    const newExpanded = new Set(expandedSections);
-    if (newExpanded.has(sectionId)) {
-      newExpanded.delete(sectionId);
-    } else {
-      newExpanded.add(sectionId);
+  // Keep the active highlight aligned with the current URL — so refreshes,
+  // direct links, and back/forward navigation all light up the right item.
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.startsWith('/admin/queries')) {
+      setActiveItem('automated-queries');
+    } else if (path.startsWith('/admin/questions')) {
+      setActiveItem('automated-questions');
     }
-    setExpandedSections(newExpanded);
-  };
+  }, [location.pathname]);
 
   const handleItemClick = (itemId: string) => {
     setActiveItem(itemId);
@@ -152,32 +153,29 @@ export function NavDrawer({ isOpen, onNavigateToFAQ, onNavigateToQuestionLinking
           <div className="flex flex-col size-full">
             <div className="flex flex-col gap-[4px] pb-[80px] px-[16px] pt-[32px] w-full">
 
-              {/* إدارة المستخدمين - User Management (parent) */}
+              {/* الاستعلامات الآلية — Automated Queries */}
               <NavItem
-                icon={<Users className="w-4 h-4" />}
-                label={isRTL ? 'إدارة المستخدمين' : 'User Management'}
-                hasChildren
-                isExpanded={expandedSections.has('user-management')}
-                onClick={() => toggleSection('user-management')}
+                icon={<Database className="w-4 h-4" />}
+                label={isRTL ? 'الاستعلامات الآلية' : 'Automated Queries'}
+                isActive={activeItem === 'automated-queries'}
+                onClick={() => {
+                  handleItemClick('automated-queries');
+                  navigate('/admin/queries');
+                }}
                 isRTL={isRTL}
               />
 
-              {expandedSections.has('user-management') && (
-                <>
-                  {/* مجموعات المستخدمين - User Groups (child) */}
-                  <NavItem
-                    icon={<UsersRound className="w-4 h-4" />}
-                    label={isRTL ? 'مجموعات المستخدمين' : 'User Groups'}
-                    isChild
-                    isActive={activeItem === 'user-groups'}
-                    onClick={() => {
-                      handleItemClick('user-groups');
-                      navigate('/admin/user-groups');
-                    }}
-                    isRTL={isRTL}
-                  />
-                </>
-              )}
+              {/* الأسئلة الآلية — Automated Questions */}
+              <NavItem
+                icon={<FileText className="w-4 h-4" />}
+                label={isRTL ? 'الأسئلة الآلية' : 'Automated Questions'}
+                isActive={activeItem === 'automated-questions'}
+                onClick={() => {
+                  handleItemClick('automated-questions');
+                  navigate('/admin/questions');
+                }}
+                isRTL={isRTL}
+              />
 
             </div>
           </div>
