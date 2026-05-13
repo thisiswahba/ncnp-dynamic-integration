@@ -1059,14 +1059,7 @@ export function AutoReplySettingsDialog({
                         t={t}
                         isRTL={isRTL}
                       />
-                      <button
-                        type="button"
-                        className={`flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                        style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}
-                      >
-                        <Info className="w-3.5 h-3.5" />
-                        {t('autoReply.tabForInstructions')}
-                      </button>
+                      <InstructionsPopover isRTL={isRTL} t={t} />
                     </div>
                   </div>
 
@@ -1400,6 +1393,221 @@ function QueryStatusBadge({
       </span>
       <span className="font-mono">{t(`autoReply.status.${status}`)}</span>
     </span>
+  );
+}
+
+// ── Instructions Popover ──────────────────────────────────────────────────────
+
+/**
+ * Anchored guide that explains how to build a query and which operators are
+ * available per data type. Pure content surface — does not interact with the
+ * expression state.
+ */
+function InstructionsPopover({
+  isRTL,
+  t,
+}: {
+  isRTL: boolean;
+  t: (key: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const categories: Array<{
+    id: 'comparison' | 'text' | 'range' | 'nullEmpty';
+    tone: 'primary' | 'amber' | 'blue' | 'rose';
+    symbols: string[];
+  }> = [
+    {
+      id: 'comparison',
+      tone: 'primary',
+      symbols: ['=', '≠', '>', '<', '≥', '≤'],
+    },
+    {
+      id: 'text',
+      tone: 'blue',
+      symbols: ['CONTAINS', 'NOT CONTAINS', 'STARTS WITH', 'ENDS WITH'],
+    },
+    {
+      id: 'range',
+      tone: 'amber',
+      symbols: ['BETWEEN', 'NOT BETWEEN'],
+    },
+    {
+      id: 'nullEmpty',
+      tone: 'rose',
+      symbols: ['IS NULL', 'IS NOT NULL', 'IS EMPTY', 'NOT EMPTY'],
+    },
+  ];
+
+  const toneClasses: Record<typeof categories[number]['tone'], string> = {
+    primary: 'bg-primary/10 text-primary border-primary/20',
+    amber: 'bg-amber-50 text-amber-800 border-amber-200',
+    blue: 'bg-blue-50 text-blue-800 border-blue-200',
+    rose: 'bg-rose-50 text-rose-800 border-rose-200',
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+          style={{ fontSize: 'var(--text-xs)', fontWeight: 500 }}
+          aria-label={t('autoReply.instructions.title')}
+        >
+          <Info className="w-3.5 h-3.5" />
+          {t('autoReply.instructions.button')}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align={isRTL ? 'start' : 'end'}
+        sideOffset={8}
+        className="w-[400px] max-h-[520px] overflow-y-auto p-0 rounded-xl border border-border shadow-[0_20px_60px_-15px_rgba(0,0,0,0.25)] bg-white"
+      >
+        {/* Header */}
+        <div
+          className={`px-4 py-3 border-b border-border/60 bg-muted/40 ${isRTL ? 'text-right' : 'text-left'}`}
+        >
+          <p
+            className="text-muted-foreground uppercase font-semibold"
+            style={{ fontSize: '10px', letterSpacing: '0.12em' }}
+          >
+            {t('autoReply.instructions.eyebrow')}
+          </p>
+          <h3
+            className="text-foreground mt-0.5"
+            style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.005em' }}
+          >
+            {t('autoReply.instructions.title')}
+          </h3>
+          <p
+            className="text-muted-foreground mt-1 leading-snug"
+            style={{ fontSize: '11px' }}
+          >
+            {t('autoReply.instructions.subtitle')}
+          </p>
+        </div>
+
+        {/* How to build — numbered steps */}
+        <div className={`px-4 py-3 ${isRTL ? 'text-right' : 'text-left'}`}>
+          <p
+            className="text-muted-foreground uppercase font-semibold mb-2"
+            style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+          >
+            {t('autoReply.instructions.howToHeader')}
+          </p>
+          <ol className="space-y-2">
+            {['step1', 'step2', 'step3', 'step4'].map((stepKey, idx) => (
+              <li
+                key={stepKey}
+                className={`flex items-start gap-2.5 ${isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'}`}
+              >
+                <span
+                  className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-primary-foreground font-mono"
+                  style={{ fontSize: '10px', fontWeight: 700 }}
+                  aria-hidden="true"
+                >
+                  {idx + 1}
+                </span>
+                <span
+                  className="text-foreground leading-snug"
+                  style={{ fontSize: '12px' }}
+                >
+                  {t(`autoReply.instructions.${stepKey}`)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        {/* Operator categories */}
+        <div className={`px-4 py-3 border-t border-border/60 ${isRTL ? 'text-right' : 'text-left'}`}>
+          <p
+            className="text-muted-foreground uppercase font-semibold mb-2"
+            style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+          >
+            {t('autoReply.instructions.operatorsHeader')}
+          </p>
+          <div className="space-y-3">
+            {categories.map((cat) => (
+              <div key={cat.id}>
+                <div
+                  className={`flex items-baseline gap-2 mb-1.5 ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
+                >
+                  <p
+                    className="text-foreground font-semibold"
+                    style={{ fontSize: '12px' }}
+                  >
+                    {t(`autoReply.editor.opCategory.${cat.id}`)}
+                  </p>
+                  <p
+                    className="text-muted-foreground"
+                    style={{ fontSize: '11px' }}
+                  >
+                    {t(`autoReply.instructions.cat.${cat.id}.note`)}
+                  </p>
+                </div>
+                <div
+                  className={`flex flex-wrap gap-1 ${isRTL ? 'flex-row-reverse justify-end' : 'flex-row'}`}
+                >
+                  {cat.symbols.map((s) => (
+                    <span
+                      key={s}
+                      className={`inline-flex items-center px-2 h-6 rounded-md border font-mono ${toneClasses[cat.tone]}`}
+                      style={{ fontSize: '11px', fontWeight: 600 }}
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+                <p
+                  className="text-muted-foreground mt-1.5 italic"
+                  style={{ fontSize: '11px', lineHeight: 1.4 }}
+                >
+                  {t(`autoReply.instructions.cat.${cat.id}.example`)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tips */}
+        <div className={`px-4 py-3 border-t border-border/60 bg-muted/30 ${isRTL ? 'text-right' : 'text-left'}`}>
+          <p
+            className="text-muted-foreground uppercase font-semibold mb-2"
+            style={{ fontSize: '10px', letterSpacing: '0.1em' }}
+          >
+            {t('autoReply.instructions.tipsHeader')}
+          </p>
+          <ul className="space-y-1.5">
+            {[
+              { key: 'tipMultipleIfs', icon: '+' },
+              { key: 'tipParens', icon: '( )' },
+              { key: 'tipValidate', icon: '✓' },
+            ].map(({ key, icon }) => (
+              <li
+                key={key}
+                className={`flex items-start gap-2 ${isRTL ? 'flex-row-reverse text-right' : 'flex-row text-left'}`}
+              >
+                <span
+                  className="shrink-0 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-md bg-primary/10 text-primary font-mono"
+                  style={{ fontSize: '10px', fontWeight: 700 }}
+                  aria-hidden="true"
+                >
+                  {icon}
+                </span>
+                <span
+                  className="text-foreground leading-snug"
+                  style={{ fontSize: '11px' }}
+                >
+                  {t(`autoReply.instructions.${key}`)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
