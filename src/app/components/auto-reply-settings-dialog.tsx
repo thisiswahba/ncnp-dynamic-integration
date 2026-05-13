@@ -1049,6 +1049,7 @@ export function AutoReplySettingsDialog({
                 step="01"
                 label={isRisk ? t('autoReply.risk') : t('autoReply.question')}
                 isRTL={isRTL}
+                t={t}
               />
               <div
                 className={`rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-foreground leading-snug ${isRTL ? 'text-right' : 'text-left'}`}
@@ -1061,7 +1062,7 @@ export function AutoReplySettingsDialog({
             {/* Sub Question — tree-style card stack (replaces dropdown) */}
             {question.subQuestions && question.subQuestions.length > 0 && (
               <div>
-                <SectionEyebrow step="02" label={t('autoReply.subQuestion')} isRTL={isRTL} />
+                <SectionEyebrow step="02" label={t('autoReply.subQuestion')} isRTL={isRTL} t={t} />
                 <div className="space-y-2.5">
                   <SubQuestionCard
                     id="main"
@@ -1094,17 +1095,20 @@ export function AutoReplySettingsDialog({
 
             {/* Predefined Answers */}
             <div>
-              <div
-                className={`flex items-end justify-between mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-              >
+              {/* Header — rely on parent `dir` for visual order; no manual
+                  flex-row-reverse hack so Arabic puts eyebrow on the right
+                  and the toggle on the left automatically. */}
+              <div className="flex items-end justify-between mb-3">
                 <SectionEyebrow
                   step="03"
                   label={isRisk ? t('autoReply.predefinedScoresRange') : t('autoReply.predefinedAnswers')}
                   isRTL={isRTL}
                   noMargin
+                  t={t}
                 />
                 <label
-                  className={`flex items-center gap-3 cursor-pointer select-none ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                  className="flex items-center gap-3 cursor-pointer select-none"
+                  dir="ltr"
                 >
                   <span
                     className="text-foreground font-medium"
@@ -1144,19 +1148,16 @@ export function AutoReplySettingsDialog({
             >
               <div className="overflow-hidden min-h-0">
                 <div>
-                  <div
-                    className={`flex items-end justify-between mb-3 gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                  >
+                  <div className="flex items-end justify-between mb-3 gap-3">
                     <SectionEyebrow
                       step="04"
                       label={t('autoReply.autoQuerySettings')}
                       required
                       isRTL={isRTL}
                       noMargin
+                      t={t}
                     />
-                    <div
-                      className={`flex items-center gap-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                    >
+                    <div className="flex items-center gap-3">
                       <QueryStatusBadge
                         status={validationStatus}
                         t={t}
@@ -1824,27 +1825,32 @@ function SectionEyebrow({
   required,
   isRTL,
   noMargin,
+  t,
 }: {
   step: string;
   label: string;
   required?: boolean;
   isRTL: boolean;
   noMargin?: boolean;
+  t?: (key: string) => string;
 }) {
+  const stepWord = t ? t('autoReply.step') : 'Step';
   return (
     <div className={`${noMargin ? '' : 'mb-2.5'} ${isRTL ? 'text-right' : 'text-left'}`}>
       <p
         className="uppercase text-muted-foreground font-medium"
         style={{ fontSize: '10px', letterSpacing: '0.12em' }}
+        dir={isRTL ? 'rtl' : 'ltr'}
       >
-        {`Step ${step}`}
+        {`${stepWord} ${step}`}
       </p>
       <h3
         className="text-foreground mt-0.5"
         style={{ fontSize: '15px', fontWeight: 600, letterSpacing: '-0.005em' }}
+        dir={isRTL ? 'rtl' : 'ltr'}
       >
         {label}
-        {required && <span className="text-destructive ml-1">*</span>}
+        {required && <span className="text-destructive ms-1">*</span>}
       </h3>
     </div>
   );
@@ -2666,15 +2672,14 @@ function UserIdSection({
 
   return (
     <div className="mt-6">
-      <div
-        className={`flex items-end justify-between mb-3 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-      >
+      <div className="flex items-end justify-between mb-3">
         <SectionEyebrow
           step="05"
           label={t('autoReply.testInputs.label')}
           required
           isRTL={isRTL}
           noMargin
+          t={t}
         />
         <span
           className="text-muted-foreground"
