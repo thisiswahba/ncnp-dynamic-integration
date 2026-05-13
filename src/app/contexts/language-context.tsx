@@ -242,7 +242,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'queries.success.executed': 'تم تشغيل الاستعلام بنجاح',
 
       // Question Automation
-      'questionAutomation.title': 'إدارة الأسئلة المؤتمتة',
+      'questionAutomation.title': 'بنك الأسئلة',
+      'questionAutomation.subtitle': 'إدارة الأسئلة المُهيّأة للإجابة الآلية.',
       'questionAutomation.tab.questionBank': 'بنك الأسئلة',
       'questionAutomation.searchPlaceholder': 'النص المدخل',
       'questionAutomation.searchButton': 'بحث',
@@ -819,7 +820,8 @@ const translations: Record<Module, Record<Language, Record<string, string>>> = {
       'queries.success.executed': 'Query executed successfully',
 
       // Question Automation
-      'questionAutomation.title': 'Manage Automated Questions',
+      'questionAutomation.title': 'Question Bank',
+      'questionAutomation.subtitle': 'Manage the questions configured for automated replies.',
       'questionAutomation.tab.questionBank': 'Question Bank',
       'questionAutomation.searchPlaceholder': 'Entered text',
       'questionAutomation.searchButton': 'Search',

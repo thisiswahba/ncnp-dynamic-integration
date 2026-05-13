@@ -205,18 +205,9 @@ export function QuestionAutomationPage() {
         <h1 className="text-foreground" style={{ fontSize: 'var(--text-3xl)', fontWeight: 700 }}>
           {t('questionAutomation.title')}
         </h1>
-      </div>
-
-      {/* Tab */}
-      <div className="border-b border-border mb-6">
-        <div className={`flex ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}>
-          <button
-            className="px-1 py-3 border-b-2 border-primary text-foreground"
-            style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}
-          >
-            {t('questionAutomation.tab.questionBank')}
-          </button>
-        </div>
+        <p className="text-muted-foreground mt-1" style={{ fontSize: 'var(--text-sm)' }}>
+          {t('questionAutomation.subtitle')}
+        </p>
       </div>
 
       {/* Search + Filter Bar */}
