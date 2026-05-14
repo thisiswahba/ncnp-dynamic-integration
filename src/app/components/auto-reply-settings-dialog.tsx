@@ -1360,35 +1360,22 @@ export function AutoReplySettingsDialog({
                   )}
 
                   {/*
-                    Two-phase preview cluster (Build → Run → Validate → Save):
-                      Phase A — Run was clicked, awaiting Validate:
-                        - Test Input section (User ID + Year, both mandatory)
-                      Phase B — Validate succeeded:
-                        - "Query is Valid" banner
-                        - Query Preview (readable form of the query)
-                        - Query Output (matched-answer result)
-                        - Test Input stays visible so the user can edit + revalidate
+                    Two-phase preview cluster (Build → Run → Validate → Save).
+                    Order matters: when Validate succeeds the Test Input
+                    section sits directly under the "Query is Valid" banner,
+                    so the admin's eye lands on the valid check first and
+                    Test Input second. The Query Preview and Query Output
+                    follow below them.
                   */}
                   {hasClickedRun && (
                     <div ref={inquiryRef} className="mt-4 space-y-4">
                       {validationStatus === 'valid' && (
-                        <>
-                          <QueryResultBanner
-                            result={{ success: true, message: t('autoReply.queryValid.body') }}
-                            title={t('autoReply.queryValid.title')}
-                            t={t}
-                            isRTL={isRTL}
-                          />
-                          <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
-                          {inquiryResult?.success && (
-                            <QueryResultBanner
-                              result={inquiryResult}
-                              title={t('autoReply.queryOutput.title')}
-                              t={t}
-                              isRTL={isRTL}
-                            />
-                          )}
-                        </>
+                        <QueryResultBanner
+                          result={{ success: true, message: t('autoReply.queryValid.body') }}
+                          title={t('autoReply.queryValid.title')}
+                          t={t}
+                          isRTL={isRTL}
+                        />
                       )}
                       <TestInputsSection
                         userId={testUserId}
@@ -1400,6 +1387,19 @@ export function AutoReplySettingsDialog({
                         isRTL={isRTL}
                         t={t}
                       />
+                      {validationStatus === 'valid' && (
+                        <>
+                          <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
+                          {inquiryResult?.success && (
+                            <QueryResultBanner
+                              result={inquiryResult}
+                              title={t('autoReply.queryOutput.title')}
+                              t={t}
+                              isRTL={isRTL}
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 
