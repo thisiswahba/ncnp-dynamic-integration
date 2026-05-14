@@ -76,7 +76,10 @@ interface CatalogWorkField {
 /**
  * One IF clause — the same shape as the parent Condition minus the
  * rule-level metadata (id, answerId, parens). Used by `andClauses` to
- * inline AND-joined sub-conditions within the same rule.
+ * inline logical-operator-joined sub-conditions within the same rule.
+ * The `andClauses` field name is preserved for backwards compatibility;
+ * each clause's `connector` field is what decides whether it AND-joins or
+ * OR-joins to the previous clause (BR Scenario 2 — Logical operators).
  */
 export interface ConditionClause {
   domain?: string;
@@ -86,6 +89,8 @@ export interface ConditionClause {
   operator?: string;
   value?: string;
   value2?: string;
+  /** Logical operator joining this clause to the previous one. Defaults to 'AND'. */
+  connector?: 'AND' | 'OR';
 }
 
 export interface Condition {
@@ -743,6 +748,10 @@ export function AutoReplySettingsDialog({
   // are captured in the audit trail (BR 1.9), and gate Save until filled.
   const [testUserId, setTestUserId] = useState<string>('');
   const [testYear, setTestYear] = useState<string>('');
+  // Run → reveals Test Inputs. Validate → runs structure + input checks
+  // + executes the rules to surface the matched-answer "Query Output".
+  // The flow is: Build → Run → fill Test Inputs → Validate → Save.
+  const [hasClickedRun, setHasClickedRun] = useState<boolean>(false);
   const inquiryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -784,6 +793,7 @@ export function AutoReplySettingsDialog({
       setExecutionError(null);
       setTestUserId('');
       setTestYear('');
+      setHasClickedRun(false);
     }
   }, [open, question, preloaded]);
 
@@ -910,20 +920,40 @@ export function AutoReplySettingsDialog({
   };
 
   /**
-   * BR 1.1 — Entry point for Validate.
+   * Run — Step 1 of the two-step preview flow.
    *
-   * Runs ONLY structural validation (BR 1.2–1.5). The Test Input + audit
-   * trail belong to the Save step, so this just confirms that the rules
-   * are well-formed. On success the status flips to `valid`, the
-   * "Query is Valid" banner appears, and the Test Input section becomes
-   * visible so the admin can supply the User ID and save.
+   * No validation here. Clicking Run reveals the Test Input section so the
+   * admin can supply the User ID + Year before the actual checks run.
+   * Any prior validation status is cleared so the UI returns to a clean
+   * "ready to validate" state if the user edited the rules after a
+   * previous Validate pass.
+   */
+  const handleRun = () => {
+    setHasClickedRun(true);
+    setValidationStatus('unvalidated');
+    setValidationErrors([]);
+    setInquiryResult(null);
+    setExecutionError(null);
+  };
+
+  /**
+   * BR 1.1 — Validate.
+   *
+   * Step 2 of the two-step preview flow. Runs structural validation
+   * (BR 1.2–1.5) + Test Input validation (BR 1.8) + executes the rules so
+   * the matched-answer Query Output is surfaced (BR 1.3 / 3.2 / 3.3). On
+   * success the status flips to `valid`, the "Query is Valid" banner
+   * appears, and Save is enabled.
    */
   const handleValidateAndExecute = () => {
     setExecutionError(null);
 
     const structuralErrors = validateExpression(expression);
-    if (structuralErrors.length > 0) {
-      setValidationErrors(structuralErrors);
+    const inputErrors = validateTestInputs();
+    const allErrors = [...structuralErrors, ...inputErrors];
+
+    if (allErrors.length > 0) {
+      setValidationErrors(allErrors);
       setValidationStatus('invalid');
       setInquiryResult(null);
       return;
@@ -936,11 +966,42 @@ export function AutoReplySettingsDialog({
       return;
     }
 
-    // BR 3.1 — passed structural validation. Test Input + execution happen
-    // on Save; see `handleSave`.
+    // BR 3.1 — passed all checks. Flip status, then execute the rules so
+    // the matched-answer Query Output is rendered alongside the banner.
     setValidationErrors([]);
     setValidationStatus('valid');
-    setInquiryResult(null);
+    runExecution();
+  };
+
+  /**
+   * BR 1.3 / 3.2 / 3.3 — resolve the rules to a matched THEN answer and
+   * surface it as the Query Output. We don't have a real runtime evaluator
+   * for the AND/OR/parens logic in this iteration; for the demo we resolve
+   * to the first rule that is structurally complete, falling back to the
+   * ELSE rule's answer when no concrete IF rule is present. This is good
+   * enough to demonstrate the flow + populate the banner result line.
+   */
+  const runExecution = () => {
+    try {
+      const firstConcrete = expression.conditions.find(
+        (c) => !c.isElse && isConditionComplete(c)
+      );
+      const elseRule = expression.conditions.find((c) => c.isElse);
+      const winningRule = firstConcrete ?? elseRule;
+      const resolved = winningRule?.answerId
+        ? displayedAnswers.find((a) => a.id === winningRule.answerId)
+        : displayedAnswers[0];
+
+      if (!resolved) {
+        setInquiryResult({ success: false, message: t('autoReply.inquiry.noAnswers') });
+        return;
+      }
+      setInquiryResult({ success: true, answer: resolved.text, elapsedMs: 248 });
+    } catch {
+      setExecutionError(t('autoReply.bnm.BNM0'));
+      setInquiryResult(null);
+      setValidationStatus('invalid');
+    }
   };
 
 
@@ -1208,21 +1269,37 @@ export function AutoReplySettingsDialog({
                       )}
                     </div>
 
-                    {/* BR 1.1 — Validate & Execute (footer inside canvas) */}
+                    {/* Two-step preview footer (BR 1.1):
+                          - Run → reveals the Test Input section
+                          - Validate → runs structure + input checks + executes
+                                       and surfaces the matched Query Output */}
                     {!isReadOnly && (
                       <div
                         className={`relative flex items-center justify-end gap-2 px-4 py-3 border-t border-border/60 bg-white/60 backdrop-blur-sm ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
                       >
-                        <button
-                          type="button"
-                          onClick={handleValidateAndExecute}
-                          disabled={!hasAnyComplete}
-                          className={`inline-flex items-center gap-2 h-10 px-5 rounded-lg font-medium bg-primary text-primary-foreground shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.08)] hover:shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_4px_12px_rgba(22,101,52,0.2)] hover:-translate-y-px active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:cursor-not-allowed ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
-                          style={{ fontSize: 'var(--text-sm)' }}
-                        >
-                          <Sparkles className="w-4 h-4" />
-                          {t('autoReply.validate.execute')}
-                        </button>
+                        {!hasClickedRun ? (
+                          <button
+                            type="button"
+                            onClick={handleRun}
+                            disabled={!hasAnyComplete}
+                            className={`inline-flex items-center gap-2 h-10 px-5 rounded-lg font-medium bg-primary text-primary-foreground shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.08)] hover:shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_4px_12px_rgba(22,101,52,0.2)] hover:-translate-y-px active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:cursor-not-allowed ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                            style={{ fontSize: 'var(--text-sm)' }}
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            {t('autoReply.run')}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleValidateAndExecute}
+                            disabled={!hasAnyComplete}
+                            className={`inline-flex items-center gap-2 h-10 px-5 rounded-lg font-medium bg-primary text-primary-foreground shadow-[0_1px_0_rgba(255,255,255,0.1)_inset,0_1px_2px_rgba(0,0,0,0.08)] hover:shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_4px_12px_rgba(22,101,52,0.2)] hover:-translate-y-px active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:cursor-not-allowed ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
+                            style={{ fontSize: 'var(--text-sm)' }}
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            {t('autoReply.validate')}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1283,21 +1360,36 @@ export function AutoReplySettingsDialog({
                   )}
 
                   {/*
-                    Success cluster — order matters per the latest design:
-                      1. "Query is Valid" banner sits directly under the canvas
-                      2. Query Preview field shows the readable form of the query
-                      3. Test Input (User ID *) is the last gate before Save
-                    The block is only mounted when structural validation passes.
+                    Two-phase preview cluster (Build → Run → Validate → Save):
+                      Phase A — Run was clicked, awaiting Validate:
+                        - Test Input section (User ID + Year, both mandatory)
+                      Phase B — Validate succeeded:
+                        - "Query is Valid" banner
+                        - Query Preview (readable form of the query)
+                        - Query Output (matched-answer result)
+                        - Test Input stays visible so the user can edit + revalidate
                   */}
-                  {validationStatus === 'valid' && (
+                  {hasClickedRun && (
                     <div ref={inquiryRef} className="mt-4 space-y-4">
-                      <QueryResultBanner
-                        result={{ success: true, message: t('autoReply.queryValid.body') }}
-                        title={t('autoReply.queryValid.title')}
-                        t={t}
-                        isRTL={isRTL}
-                      />
-                      <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
+                      {validationStatus === 'valid' && (
+                        <>
+                          <QueryResultBanner
+                            result={{ success: true, message: t('autoReply.queryValid.body') }}
+                            title={t('autoReply.queryValid.title')}
+                            t={t}
+                            isRTL={isRTL}
+                          />
+                          <QueryPreviewField question={question.title} t={t} isRTL={isRTL} />
+                          {inquiryResult?.success && (
+                            <QueryResultBanner
+                              result={inquiryResult}
+                              title={t('autoReply.queryOutput.title')}
+                              t={t}
+                              isRTL={isRTL}
+                            />
+                          )}
+                        </>
+                      )}
                       <TestInputsSection
                         userId={testUserId}
                         year={testYear}
@@ -1311,8 +1403,9 @@ export function AutoReplySettingsDialog({
                     </div>
                   )}
 
-                  {inquiryResult && validationStatus !== 'valid' && (
-                    <div ref={inquiryRef} className="mt-4">
+                  {/* Non-success inquiryResult (e.g. "no predefined answers") */}
+                  {inquiryResult && !inquiryResult.success && (
+                    <div className="mt-4">
                       <QueryResultBanner result={inquiryResult} t={t} isRTL={isRTL} />
                     </div>
                   )}
@@ -2120,6 +2213,13 @@ interface ConditionClauseRowProps {
  *   `AND  <domain>  /  <source>  /  <element>  <op>  <value>`
  */
 function ConditionClauseRow({ clause, isRTL, t }: ConditionClauseRowProps) {
+  // BR Scenario 2 (Logical operators): the chip swaps between AND and OR
+  // based on the clause's `connector` field. Missing connector defaults to
+  // AND so historical preloaded data keeps rendering unchanged.
+  const connectorKey =
+    clause.connector === 'OR'
+      ? 'autoReply.editor.or'
+      : 'autoReply.editor.and';
   return (
     <div
       className={`flex flex-wrap items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : 'flex-row'}`}
@@ -2128,7 +2228,7 @@ function ConditionClauseRow({ clause, isRTL, t }: ConditionClauseRowProps) {
         className="uppercase font-mono font-semibold text-muted-foreground px-2 py-0.5 rounded bg-muted/60"
         style={{ fontSize: '10px', letterSpacing: '0.15em' }}
       >
-        {t('autoReply.editor.and')}
+        {t(connectorKey)}
       </span>
       <Pill label={clause.domain ?? ''} placeholder="—" isSet onClick={() => {}} />
       <Separator />

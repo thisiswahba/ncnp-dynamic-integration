@@ -33,7 +33,7 @@ const mockQueries: Query[] = [
   { id: '3', queryId: '#QRY-1003', linkedItem: 'Financial Fraud Risk — High Severity', linkedType: 'risk', linkedId: '#R-201', businessDomain: 'Financial', status: 'deactivated', lastUpdated: '20/11/2024', createdBy: 'Sarah A.' },
   { id: '4', queryId: '#QRY-1004', linkedItem: 'Compliance years maintained', linkedType: 'question', linkedId: '#1004', businessDomain: 'Compliance', status: 'activated', lastUpdated: '18/11/2024', createdBy: 'Mohamed S.' },
   { id: '5', queryId: '#QRY-1005', linkedItem: 'Regulatory Violation Risk', linkedType: 'risk', linkedId: '#R-202', businessDomain: 'Compliance', status: 'activated', lastUpdated: '15/11/2024', createdBy: 'Sarah A.' },
-  { id: '6', queryId: '#QRY-1006', linkedItem: 'Beneficiaries growth rate', linkedType: 'question', linkedId: '#1006', businessDomain: 'Operations', status: 'deactivated', lastUpdated: '12/11/2024', createdBy: 'Ahmed K.' },
+  { id: '6', queryId: '#QRY-1006', linkedItem: 'Beneficiaries growth rate', linkedType: 'question', linkedId: '#1006', businessDomain: 'Operations', status: 'activated', lastUpdated: '12/11/2024', createdBy: 'Ahmed K.' },
   { id: '7', queryId: '#QRY-1007', linkedItem: 'Service Coverage Risk', linkedType: 'risk', linkedId: '#R-203', businessDomain: 'Operations', status: 'activated', lastUpdated: '10/11/2024', createdBy: 'Ahmed K.' },
 ];
 
@@ -42,8 +42,8 @@ const mockQueries: Query[] = [
 // auto-reply settings dialog renders the full Figma design (branching answers
 // with a sub-question + nested options).
 /**
- * Predefined answers used by both demo queries. Same three options
- * (Answer 1 / 2 / 3) so the demo rules can map deterministically:
+ * Predefined answers used by the simple demo queries (#QRY-1001 / 1002).
+ * Same three options so the rules can map deterministically:
  *   - balance < 10000                 → Answer 1
  *   - balance > 10000 AND area = sa   → Answer 2
  *   - else                            → Answer 3
@@ -54,61 +54,252 @@ const DEMO_ANSWERS: AutoReplyAnswer[] = [
   { id: 'a3', text: 'Answer 3 — fallback when no rule matches', weight: 10 },
 ];
 
+/**
+ * Predefined answers used by the focused OR-demo query (#QRY-1004).
+ */
+const DEMO_ANSWERS_OR: AutoReplyAnswer[] = [
+  { id: 'a1', text: 'Answer 1 — covered region', weight: 70 },
+  { id: 'a2', text: 'Answer 2 — out-of-region fallback', weight: 30 },
+];
+
+/**
+ * Predefined answers used by the kitchen-sink demo (#QRY-1006). Six
+ * outcomes so every rule in the comprehensive query maps to its own
+ * answer (a1…a6).
+ */
+const DEMO_ANSWERS_KITCHEN_SINK: AutoReplyAnswer[] = [
+  { id: 'a1', text: 'Answer 1 — fully active and well-funded', weight: 25 },
+  { id: 'a2', text: 'Answer 2 — high-coverage region', weight: 20 },
+  { id: 'a3', text: 'Answer 3 — manager match with valid licence', weight: 15 },
+  { id: 'a4', text: 'Answer 4 — compliance flag', weight: 15 },
+  { id: 'a5', text: 'Answer 5 — dormant entity', weight: 15 },
+  { id: 'a6', text: 'Answer 6 — fallback (no rule matched)', weight: 10 },
+];
+
 function mockPreloadedForQuery(query: Query): { question: AutoReplyQuestion; preloaded: PreloadedQuery } {
-  // Both demo rows use the same predefined-answers vocabulary so the rules
-  // can refer to a1 / a2 / a3 consistently.
-  const conditions: Condition[] =
-    query.queryId === '#QRY-1002'
-      ? [
-          // Rule 1: IF balance > 10000 AND area = 'sa' THEN Answer 2
+  // Pick the appropriate rule set + answers vocabulary based on which
+  // demo this row is meant to showcase.
+  let answers: AutoReplyAnswer[];
+  let conditions: Condition[];
+
+  if (query.queryId === '#QRY-1006') {
+    // Kitchen-sink: every BR Scenario 2 operator category + parens +
+    // multiple separate IFs + ELSE in a single query.
+    answers = DEMO_ANSWERS_KITCHEN_SINK;
+    conditions = [
+      // Rule 1 — IF total_revenue ≥ 1000000 AND tax_status = 'active'
+      //           OR last_filing_date BETWEEN 2024-01-01 AND 2024-12-31
+      //         THEN Answer 1
+      {
+        id: 'r1',
+        domain: 'Financial Sector',
+        source: 'Tax Agency',
+        element: 'total_revenue',
+        elementType: 'Number',
+        operator: '≥',
+        value: '1000000',
+        andClauses: [
           {
-            id: 'c1',
             domain: 'Financial Sector',
             source: 'Tax Agency',
-            element: 'balance',
+            element: 'tax_status',
+            elementType: 'String',
+            operator: '=',
+            value: 'active',
+            connector: 'AND',
+          },
+          {
+            domain: 'Financial Sector',
+            source: 'Tax Agency',
+            element: 'last_filing_date',
+            elementType: 'Date',
+            operator: 'BETWEEN',
+            value: '2024-01-01',
+            value2: '2024-12-31',
+            connector: 'OR',
+          },
+        ],
+        answerId: 'a1',
+      },
+
+      // Rule 2 — IF ( area = 'sa' OR area = 'wa' )
+      //            AND beneficiaries_count > 500
+      //         THEN Answer 2
+      {
+        id: 'r2',
+        domain: 'Operations Sector',
+        source: 'NCNP Registry',
+        element: 'area',
+        elementType: 'String',
+        operator: '=',
+        value: 'sa',
+        openParen: true,
+        closeParen: true,
+        andClauses: [
+          {
+            domain: 'Operations Sector',
+            source: 'NCNP Registry',
+            element: 'area',
+            elementType: 'String',
+            operator: '=',
+            value: 'wa',
+            connector: 'OR',
+          },
+          {
+            domain: 'Operations Sector',
+            source: 'NCNP Registry',
+            element: 'beneficiaries_count',
             elementType: 'Number',
             operator: '>',
-            value: '10000',
-            andClauses: [
-              {
-                domain: 'Operations Sector',
-                source: 'NCNP Registry',
-                element: 'area',
-                elementType: 'String',
-                operator: '=',
-                value: 'sa',
-              },
-            ],
-            answerId: 'a2',
+            value: '500',
+            connector: 'AND',
           },
-          // Rule 2: ELSE THEN Answer 3
+        ],
+        answerId: 'a2',
+      },
+
+      // Rule 3 — IF manager_name CONTAINS 'Mohamed'
+      //            AND license_status IS NOT NULL
+      //         THEN Answer 3
+      {
+        id: 'r3',
+        domain: 'Administrative Sector',
+        source: 'HR Management',
+        element: 'manager_name',
+        elementType: 'String',
+        operator: 'CONTAINS',
+        value: 'Mohamed',
+        andClauses: [
           {
-            id: 'c2',
-            isElse: true,
-            answerId: 'a3',
-          },
-        ]
-      : [
-          // Default demo (#QRY-1001 and everything else):
-          // Rule 1: IF balance < 10000 THEN Answer 1
-          {
-            id: 'c1',
             domain: 'Financial Sector',
-            source: 'Tax Agency',
-            element: 'balance',
-            elementType: 'Number',
-            operator: '<',
-            value: '10000',
-            answerId: 'a1',
+            source: 'MFA',
+            element: 'license_status',
+            elementType: 'String',
+            operator: 'IS NOT NULL',
+            connector: 'AND',
           },
-        ];
+        ],
+        answerId: 'a3',
+      },
+
+      // Rule 4 — IF compliance_score < 50 THEN Answer 4
+      {
+        id: 'r4',
+        domain: 'Financial Sector',
+        source: 'MFA',
+        element: 'compliance_score',
+        elementType: 'Number',
+        operator: '<',
+        value: '50',
+        answerId: 'a4',
+      },
+
+      // Rule 5 — IF tax_status ≠ 'active' AND meeting_held = false
+      //         THEN Answer 5
+      {
+        id: 'r5',
+        domain: 'Financial Sector',
+        source: 'Tax Agency',
+        element: 'tax_status',
+        elementType: 'String',
+        operator: '≠',
+        value: 'active',
+        andClauses: [
+          {
+            domain: 'Administrative Sector',
+            source: 'Board Governance',
+            element: 'meeting_held',
+            elementType: 'Boolean',
+            operator: '=',
+            value: 'false',
+            connector: 'AND',
+          },
+        ],
+        answerId: 'a5',
+      },
+
+      // Rule 6 — ELSE THEN Answer 6
+      { id: 'r6', isElse: true, answerId: 'a6' },
+    ];
+  } else if (query.queryId === '#QRY-1004') {
+    // Minimal OR demo — one IF rule with two area clauses joined by OR,
+    // plus a catch-all ELSE.
+    answers = DEMO_ANSWERS_OR;
+    conditions = [
+      {
+        id: 'c1',
+        domain: 'Operations Sector',
+        source: 'NCNP Registry',
+        element: 'area',
+        elementType: 'String',
+        operator: '=',
+        value: 'sa',
+        andClauses: [
+          {
+            domain: 'Operations Sector',
+            source: 'NCNP Registry',
+            element: 'area',
+            elementType: 'String',
+            operator: '=',
+            value: 'wa',
+            connector: 'OR',
+          },
+        ],
+        answerId: 'a1',
+      },
+      { id: 'c2', isElse: true, answerId: 'a2' },
+    ];
+  } else if (query.queryId === '#QRY-1002') {
+    // Two-rule AND + ELSE demo (user's original example).
+    answers = DEMO_ANSWERS;
+    conditions = [
+      {
+        id: 'c1',
+        domain: 'Financial Sector',
+        source: 'Tax Agency',
+        element: 'balance',
+        elementType: 'Number',
+        operator: '>',
+        value: '10000',
+        andClauses: [
+          {
+            domain: 'Operations Sector',
+            source: 'NCNP Registry',
+            element: 'area',
+            elementType: 'String',
+            operator: '=',
+            value: 'sa',
+            connector: 'AND',
+          },
+        ],
+        answerId: 'a2',
+      },
+      { id: 'c2', isElse: true, answerId: 'a3' },
+    ];
+  } else {
+    // Default demo (#QRY-1001 and everything else):
+    // Rule 1: IF balance < 10000 THEN Answer 1
+    answers = DEMO_ANSWERS;
+    conditions = [
+      {
+        id: 'c1',
+        domain: 'Financial Sector',
+        source: 'Tax Agency',
+        element: 'balance',
+        elementType: 'Number',
+        operator: '<',
+        value: '10000',
+        answerId: 'a1',
+      },
+    ];
+  }
 
   return {
     question: {
       id: query.linkedId,
       title: query.linkedItem,
       automated: query.status === 'activated',
-      answers: DEMO_ANSWERS,
+      answers,
     },
     preloaded: {
       isActive: query.status === 'activated',
